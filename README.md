@@ -113,7 +113,8 @@ Ships/     Ship, ShipMovement (Rigidbody2D), ShipNavigation, ShipDamage, ShipDet
            ShipWeapons, ShipAbilities, SubmarineSystem, ShipResources, ShipVisual
 Detection/ DetectionSystem (contact memory), SmokeScreen
 Combat/    ProjectileSystem (shells, torpedoes, homing, depth charges)
-AI/        ShipAI (per-ship FSM, tactics, consumables), FleetCommander (zone squadrons)
+AI/        BattleAssessment (shared situational picture), FleetCommander (strategy),
+           ShipAI (per-ship FSM, tactics, consumables)
 Player/    ControlModeManager, DirectShipController, RTSCamera, SelectionManager,
            CommandSystem, FormationManager
 UI/        UIManager (fleet menu, HUD, action bar), Minimap, WorldOverlay, DebugOverlay
@@ -154,9 +155,55 @@ Time compression scales `Time.timeScale` and widens `Time.fixedDeltaTime` (clamp
 * **Consumables → AI.** The same `ShipAbilities` code path serves the player's action bar and the AI,
   so enemy destroyers really do smoke up under fire, cruisers radar a knife-fighting destroyer,
   battleships heal once their fires are out, and submarines ping before shooting.
-* **Fleet commander → squadrons.** The enemy commander ranks A/B/C by ownership, contest state and
-  distance, then splits the fleet roughly 45/35/20 across them, pushing destroyers ahead of each
-  zone and holding battleships behind it.
+* **Fleet commander → squadrons.** See the AI section below.
+
+## The enemy AI
+
+The AI plays by **the same fog of war you do** — it only knows what its team has actually detected —
+but it reasons hard about what it does know.
+
+**It knows what game it is playing.** `BattleAssessment` (rebuilt about twice a second per team) reads
+the mode, the score, the clock, and the points/second each side is earning, and projects who wins if
+nothing changes. That projection drives a **posture**:
+
+| Posture | When | Behaviour |
+|---|---|---|
+| `LandGrab` | early, points still neutral | take the cheap caps fast |
+| `Press` | losing on projection | force fights and flip points |
+| `Hold` | winning on projection | garrison what wins the match, trade only when safe |
+| `CloseOut` | winning, clock running out | disengage and stall it out |
+| `Desperate` | losing, clock running out | everything onto one point |
+
+In Skirmish/Fleet Battle there are no points, so it drops the caps entirely, **masses into one force**
+and goes after the weakest isolated enemy group.
+
+**Allocation is a draft, not a fixed split.** Ships are dealt one at a time to whichever zone needs
+help most, and a zone's need falls as it is fed — so a flank that is losing keeps pulling
+reinforcements automatically, with no special-case rotation code.
+
+**It actually captures points.** The first ships sent to a zone are *cap sitters*: they are required
+to be inside the ring and orbit within it rather than drifting off to shoot at something.
+
+**Fire concentration without overkill.** Shooters are committed to a target only until the assigned
+firepower covers its remaining hit points; the rest move to the next target. Kill-securing overrides
+everything — a target that dies to the next salvo gets shot first.
+
+**Tactical habits** (both fleets, so your uncommanded ships fight well too):
+
+- **Armour angling** — bow-on while reloading, broadside when the salvo is ready
+- **Support discipline** — no pushing more than ~300 units past the nearest friendly heavy
+- **Terrain cover** — when disengaging, prefers a spot that actually breaks line of sight, tested with
+  the same function the detection system uses
+- **Regroup, not retreat** — damaged ships fall back behind friends and heal instead of sailing home
+- **Local strength gating** — pushes when winning its corner of the fight, opens the range when not
+- **Inference** — a destroyer that goes dark inside torpedo range makes ships weave instead of
+  steaming predictably, and cruisers will radar a point they believe a hidden destroyer is sitting on
+
+**Difficulty** is set on `GameBootstrap.enemyDifficulty`: `Recruit` (slow reactions, no inference or
+cover), `Veteran`, `Elite` (default — fastest reactions, full inference and cover).
+
+Press **F1** in game to see it think: assignment-coloured lines to each ship's station, cap
+commitments, local strength bars, and a readout of both commanders' postures and projections.
 
 ### Tuning
 
