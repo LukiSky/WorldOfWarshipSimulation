@@ -1,0 +1,670 @@
+using System.Collections.Generic;
+using UnityEngine;
+using UnityEngine.InputSystem;
+
+namespace Naval
+{
+    /// <summary>Fleet composition chosen on the pre-battle screen.</summary>
+    public class FleetSetup
+    {
+        public int battleships = 4;
+        public int cruisers = 6;
+        public int destroyers = 6;
+        public int submarines = 2;
+        public ShipClassType controlClass = ShipClassType.Cruiser;
+        /// <summary>Start conning a ship, or start as fleet commander (the default).</summary>
+        public bool startAsCaptain = false;
+
+        public int Total => battleships + cruisers + destroyers + submarines;
+
+        public int CountOf(ShipClassType c)
+        {
+            switch (c)
+            {
+                case ShipClassType.Battleship: return battleships;
+                case ShipClassType.Cruiser: return cruisers;
+                case ShipClassType.Destroyer: return destroyers;
+                case ShipClassType.Submarine: return submarines;
+                default: return 0;
+            }
+        }
+
+        public void Adjust(ShipClassType c, int delta)
+        {
+            switch (c)
+            {
+                case ShipClassType.Battleship: battleships = Mathf.Max(0, battleships + delta); break;
+                case ShipClassType.Cruiser: cruisers = Mathf.Max(0, cruisers + delta); break;
+                case ShipClassType.Destroyer: destroyers = Mathf.Max(0, destroyers + delta); break;
+                case ShipClassType.Submarine: submarines = Mathf.Max(0, submarines + delta); break;
+            }
+        }
+
+        public List<ShipClassType> BuildOrder()
+        {
+            // heavies first so they anchor the formation and the light ships screen ahead
+            var l = new List<ShipClassType>();
+            for (int i = 0; i < battleships; i++) l.Add(ShipClassType.Battleship);
+            for (int i = 0; i < cruisers; i++) l.Add(ShipClassType.Cruiser);
+            for (int i = 0; i < destroyers; i++) l.Add(ShipClassType.Destroyer);
+            for (int i = 0; i < submarines; i++) l.Add(ShipClassType.Submarine);
+            return l;
+        }
+
+        public FleetSetup Clone() => (FleetSetup)MemberwiseClone();
+
+        public static FleetSetup Default() => new FleetSetup();
+    }
+
+    /// <summary>
+    /// Owns the match: world generation, fleet composition, deployment, the domination objective,
+    /// time compression and the victory conditions.
+    /// </summary>
+    public class GameManager : MonoBehaviour
+    {
+        public static GameManager I { get; private set; }
+
+        public const int FleetSize = 18;
+        public const float ScoreToWin = 1000f;
+        public const float ZonePointsPerSecond = 1.2f;
+        public const float KillPoints = 12f;
+
+        public GameMode Mode { get; private set; } = GameMode.Domination;
+        public GamePhase Phase { get; private set; } = GamePhase.Menu;
+        public float BattleTime { get; private set; }
+        public float TimeLimit { get; private set; } = 900f;      // 15:00
+        public float TimeRemaining => Mathf.Max(0f, TimeLimit - BattleTime);
+        public float GameSpeed { get; private set; } = 1f;
+        public FormationType DeployFormation { get; private set; } = FormationType.Wedge;
+        public FleetSetup Setup { get; private set; } = FleetSetup.Default();
+
+        public int PlayerStartCount { get; private set; }
+        public int EnemyStartCount { get; private set; }
+        public int FleetPoints { get; private set; }
+        public int EnemyFleetPoints { get; private set; }
+        public float PlayerScore { get; private set; }
+        public float EnemyScore { get; private set; }
+        public int PlayerKills { get; private set; }
+        public int EnemyKills { get; private set; }
+        public string ResultSummary { get; private set; } = "";
+
+        static readonly float[] SpeedSteps = { 0f, 1f, 2f, 4f, 8f };
+
+        readonly float[] _repair = { 100f, 100f };
+        readonly List<Ship> _transports = new List<Ship>();
+        int _seed;
+        Transform _shipRoot;
+        FleetCommander _enemyCommander;
+        FleetCommander _playerAnalyst;
+
+        /// <summary>Skill of the enemy fleet commander and its ships.</summary>
+        public AIDifficulty EnemyDifficulty = AIDifficulty.Elite;
+        bool _draggingDeploy;
+        Ship _dragShip;
+
+        public string ModeName
+        {
+            get
+            {
+                switch (Mode)
+                {
+                    case GameMode.Domination: return "Domination";
+                    case GameMode.FleetBattle: return "Fleet Battle";
+                    case GameMode.CaptureAndControl: return "Capture and Control";
+                    case GameMode.Escort: return "Escort";
+                    default: return "Skirmish";
+                }
+            }
+        }
+
+        public string ObjectiveText { get; private set; } = "";
+
+        public static GameManager Create(Transform parent)
+        {
+            var go = new GameObject("GameManager");
+            go.transform.SetParent(parent, false);
+            var g = go.AddComponent<GameManager>();
+            I = g;
+            return g;
+        }
+
+        // ------------------------------------------------------------------ setup
+
+        bool _worldFresh;
+
+        /// <summary>Sits on the pre-battle screen until the player commits a fleet.</summary>
+        public void EnterMenu(bool worldAlreadyBuilt = false)
+        {
+            Phase = GamePhase.Menu;
+            _worldFresh = worldAlreadyBuilt;
+            ApplyTimeScale();
+        }
+
+        public void StartFromMenu(FleetSetup setup, int seed = 0)
+        {
+            Setup = setup != null ? setup.Clone() : FleetSetup.Default();
+            // the bootstrap already generated a map we can fight on; only rebuild on later matches
+            bool rebuild = !_worldFresh;
+            _worldFresh = false;
+            BeginMatch(Mode, seed == 0 ? Random.Range(1, 999999) : seed, rebuild);
+        }
+
+        /// <summary>Builds the world, spawns both fleets and drops into the deployment phase.</summary>
+        public void BeginMatch(GameMode mode, int seed, bool regenerateWorld = true)
+        {
+            Mode = mode;
+            _seed = seed;
+            Phase = GamePhase.Deployment;
+            BattleTime = 0f;
+            PlayerScore = EnemyScore = 0f;
+            PlayerKills = EnemyKills = 0;
+            _repair[0] = _repair[1] = 100f;
+            ResultSummary = "";
+            ApplyTimeScale();
+
+            ClearBattlefield();
+
+            if (regenerateWorld)
+            {
+                WorldMap.I.Generate(seed, mode);
+                NavGrid.I.Build(WorldMap.I);
+            }
+            if (Minimap.I != null) Minimap.I.BakeTerrain();
+            if (FogOfWarRenderer.I != null) FogOfWarRenderer.I.Enabled = !DebugOverlay.ShowAll;
+
+            if (_shipRoot != null) Destroy(_shipRoot.gameObject);
+            var root = new GameObject("Ships");
+            root.transform.SetParent(transform.parent, false);
+            _shipRoot = root.transform;
+
+            ShipDatabase.ResetNames();
+            SpawnFleets();
+
+            if (_enemyCommander == null)
+                _enemyCommander = FleetCommander.Create(transform.parent, Team.Enemy, mode);
+            _enemyCommander.mode = mode;
+            _enemyCommander.difficulty = EnemyDifficulty;
+
+            // The player's fleet gets the same situational picture so its ships fight intelligently,
+            // but this one never issues orders - the player commands their own ships.
+            if (_playerAnalyst == null)
+                _playerAnalyst = FleetCommander.Create(transform.parent, Team.Player, mode, false);
+            _playerAnalyst.mode = mode;
+            _playerAnalyst.difficulty = AIDifficulty.Elite;
+
+            switch (mode)
+            {
+                case GameMode.Domination:
+                    ObjectiveText = "Hold zones A, B and C. First to " + (int)ScoreToWin + " points, or sink the enemy fleet.";
+                    TimeLimit = 900f;
+                    break;
+                case GameMode.Skirmish:
+                    ObjectiveText = "Destroy the enemy task force.";
+                    TimeLimit = 900f;
+                    break;
+                case GameMode.FleetBattle:
+                    ObjectiveText = "Break the enemy battle line. Highest fleet strength at the time limit wins.";
+                    TimeLimit = 1080f;
+                    break;
+                case GameMode.CaptureAndControl:
+                    ObjectiveText = "Hold the strategic zones to " + (int)ScoreToWin + " points, or sink the enemy fleet.";
+                    TimeLimit = 1200f;
+                    break;
+                case GameMode.Escort:
+                    ObjectiveText = "Escort the convoy to the eastern anchorage. Keep at least one transport alive.";
+                    TimeLimit = 1080f;
+                    break;
+            }
+
+            var cam = RTSCamera.I;
+            if (cam != null) cam.FocusOn(WorldMap.I.PlayerDeployCenter, 420f);
+
+            GameEvents.RaiseMessage("Mission: " + ModeName, Team.Neutral);
+            GameEvents.RaiseMessage(ObjectiveText, Team.Neutral);
+        }
+
+        void ClearBattlefield()
+        {
+            if (ControlModeManager.I != null) ControlModeManager.I.EnterRTS();
+
+            var all = new List<Ship>(ShipRegistry.All);
+            for (int i = 0; i < all.Count; i++)
+                if (all[i] != null) Destroy(all[i].gameObject);
+            ShipRegistry.Clear();
+            _transports.Clear();
+
+            if (SelectionManager.I != null) SelectionManager.I.Clear();
+            if (ProjectileSystem.I != null) ProjectileSystem.I.ClearAll();
+            if (SmokeSystem.I != null) SmokeSystem.I.Clear();
+            if (DetectionSystem.I != null) DetectionSystem.I.Clear();
+            if (ParticleFX.I != null) ParticleFX.I.ClearAll();
+            BattleAssessment.Clear();
+            OrderMarkers.All.Clear();
+            HitMarkers.All.Clear();
+        }
+
+        /// <summary>Ships belonging to each squadron, in left / centre / right order.</summary>
+        public readonly List<Ship>[] PlayerGroups = { new List<Ship>(), new List<Ship>(), new List<Ship>() };
+
+        void SpawnFleets()
+        {
+            var playerComp = CompositionFor(Mode, true);
+            var enemyComp = CompositionFor(Mode, false);
+
+            SpawnFleet(playerComp, Team.Player);
+            SpawnFleet(enemyComp, Team.Enemy);
+
+            PlayerStartCount = ShipRegistry.OfTeam(Team.Player).Count;
+            EnemyStartCount = ShipRegistry.OfTeam(Team.Enemy).Count;
+            RecomputePoints();
+
+            // control groups 1, 2 and 3 come pre-bound to the three squadrons
+            if (SelectionManager.I != null)
+                for (int g = 0; g < 3; g++)
+                    SelectionManager.I.AssignGroup(g + 1, PlayerGroups[g]);
+
+            GameEvents.RaiseMessage(
+                "Task force deployed in three groups - press 1, 2 or 3 to select LEFT, CENTRE or RIGHT",
+                Team.Player);
+        }
+
+        List<ShipClassType> CompositionFor(GameMode mode, bool player)
+        {
+            // Domination and Skirmish use the player's chosen 18-ship fleet, mirrored for the enemy
+            if (mode == GameMode.Domination || mode == GameMode.Skirmish || mode == GameMode.FleetBattle)
+            {
+                var list = Setup.BuildOrder();
+                // both sides always field exactly the same number of hulls
+                while (list.Count > FleetSize) list.RemoveAt(list.Count - 1);
+                while (list.Count < FleetSize) list.Add(ShipClassType.Destroyer);
+                return list;
+            }
+
+            var l = new List<ShipClassType>();
+            switch (mode)
+            {
+                case GameMode.CaptureAndControl:
+                    for (int i = 0; i < 3; i++) l.Add(ShipClassType.Battleship);
+                    for (int i = 0; i < 6; i++) l.Add(ShipClassType.Cruiser);
+                    for (int i = 0; i < 7; i++) l.Add(ShipClassType.Destroyer);
+                    for (int i = 0; i < 2; i++) l.Add(ShipClassType.Submarine);
+                    break;
+                default:  // Escort
+                    if (player)
+                    {
+                        for (int i = 0; i < 3; i++) l.Add(ShipClassType.Transport);
+                        for (int i = 0; i < 5; i++) l.Add(ShipClassType.Cruiser);
+                        for (int i = 0; i < 10; i++) l.Add(ShipClassType.Destroyer);
+                    }
+                    else
+                    {
+                        for (int i = 0; i < 3; i++) l.Add(ShipClassType.Battleship);
+                        for (int i = 0; i < 5; i++) l.Add(ShipClassType.Cruiser);
+                        for (int i = 0; i < 7; i++) l.Add(ShipClassType.Destroyer);
+                        for (int i = 0; i < 3; i++) l.Add(ShipClassType.Submarine);
+                    }
+                    break;
+            }
+            return l;
+        }
+
+        /// <summary>
+        /// Deploys a fleet as three squadrons - left flank, centre, right flank - the way a
+        /// domination match lines up. Classes are dealt round robin so each group is a balanced
+        /// task force rather than a pile of battleships on one wing.
+        /// </summary>
+        void SpawnFleet(List<ShipClassType> comp, Team team)
+        {
+            var map = WorldMap.I;
+            var centers = team == Team.Player ? map.PlayerDeployCenters : map.EnemyDeployCenters;
+
+            var groups = new List<ShipClassType>[3];
+            for (int g = 0; g < 3; g++) groups[g] = new List<ShipClassType>();
+            for (int i = 0; i < comp.Count; i++) groups[i % 3].Add(comp[i]);
+
+            if (team == Team.Player)
+                for (int g = 0; g < 3; g++) PlayerGroups[g].Clear();
+
+            for (int g = 0; g < 3; g++)
+            {
+                Vector2 center = centers[Mathf.Min(g, centers.Length - 1)];
+                Vector2 facing = (Vector2.zero - center);
+                float heading = facing.sqrMagnitude > 1f ? NavalMath.VectorToHeading(facing) : 0f;
+
+                // a squadron of six sits in a compact block behind its screen
+                var offsets = FormationManager.Offsets(FormationType.Wedge, groups[g].Count, 68f);
+
+                for (int i = 0; i < groups[g].Count; i++)
+                {
+                    Vector2 pos = center + NavalMath.Rotate(offsets[i], -heading);
+                    var stats = ShipDatabase.Get(groups[g][i]);
+                    if (NavGrid.I != null)
+                    {
+                        Vector2 snapped = NavGrid.I.NearestNavigable(pos, stats.draft);
+                        // snapping returns a cell centre, so two ships can land on the same spot and
+                        // shove each other apart the instant physics starts - jitter them apart
+                        if ((snapped - pos).sqrMagnitude > 0.01f) snapped += Random.insideUnitCircle * 14f;
+                        pos = snapped;
+                    }
+                    var ship = Ship.Spawn(_shipRoot, team, groups[g][i], pos, heading);
+                    if (groups[g][i] == ShipClassType.Transport) _transports.Add(ship);
+                    if (team == Team.Player) { PlayerGroups[g].Add(ship); ship.ControlGroup = g + 1; }
+                }
+            }
+        }
+
+        // ------------------------------------------------------------------ phase control
+
+        public void StartBattle()
+        {
+            if (Phase != GamePhase.Deployment) return;
+            Phase = GamePhase.Battle;
+            SetSpeed(1f);
+            GameEvents.RaiseMessage("Action stations - the battle has begun", Team.Player);
+
+            // The player commands the fleet by default; only take the helm if they asked for it.
+            if (Setup.startAsCaptain && ControlModeManager.I != null)
+            {
+                var ship = FindStartingShip(Setup.controlClass);
+                if (ship != null) ControlModeManager.I.EnterDirect(ship);
+            }
+            else
+            {
+                if (RTSCamera.I != null) RTSCamera.I.FleetOverview();
+                GameEvents.RaiseMessage("Fleet command - 1/2/3 select your left, centre and right groups, Tab takes the helm", Team.Player);
+            }
+
+            if (Mode == GameMode.Escort)
+                for (int i = 0; i < _transports.Count; i++)
+                    if (_transports[i] != null && !_transports[i].IsDead)
+                        _transports[i].Navigation.OrderMove(WorldMap.I.EscortDestination);
+        }
+
+        Ship FindStartingShip(ShipClassType cls)
+        {
+            var ships = ShipRegistry.OfTeam(Team.Player);
+            for (int i = 0; i < ships.Count; i++)
+                if (ships[i] != null && !ships[i].IsDead && ships[i].Stats.classType == cls) return ships[i];
+            return ships.Count > 0 ? ships[0] : null;
+        }
+
+        // ------------------------------------------------------------------ time compression
+
+        public void SetSpeed(float s)
+        {
+            GameSpeed = Mathf.Clamp(s, 0f, 8f);
+            ApplyTimeScale();
+            if (GameSpeed > 0f) GameEvents.RaiseMessage("Time compression x" + GameSpeed.ToString("0.#"), Team.Neutral);
+        }
+
+        public void CycleSpeed(int direction)
+        {
+            int idx = 1;
+            for (int i = 0; i < SpeedSteps.Length; i++)
+                if (Mathf.Approximately(SpeedSteps[i], GameSpeed)) { idx = i; break; }
+            idx = Mathf.Clamp(idx + direction, 0, SpeedSteps.Length - 1);
+            SetSpeed(SpeedSteps[idx]);
+        }
+
+        void ApplyTimeScale()
+        {
+            bool running = Phase == GamePhase.Battle;
+            Time.timeScale = running ? GameSpeed : 0f;
+
+            // Larger physics steps at high compression instead of hundreds of solver ticks per second.
+            // Ships are 11-25 units long and use continuous detection, so this stays stable.
+            float ts = Mathf.Max(1f, Time.timeScale);
+            Time.fixedDeltaTime = 0.02f * Mathf.Clamp(ts, 1f, 4f);
+            Time.maximumDeltaTime = 0.33f;
+        }
+
+        /// <summary>Re-forms each of the three squadrons around its own deployment point.</summary>
+        public void SetDeployFormation(FormationType t)
+        {
+            DeployFormation = t;
+            var map = WorldMap.I;
+            if (map == null) return;
+
+            for (int g = 0; g < 3; g++)
+            {
+                var group = PlayerGroups[g];
+                if (group.Count == 0) continue;
+
+                Vector2 center = map.PlayerDeployCenters[Mathf.Min(g, map.PlayerDeployCenters.Length - 1)];
+                Vector2 facing = Vector2.zero - center;
+                float heading = facing.sqrMagnitude > 1f ? NavalMath.VectorToHeading(facing) : 0f;
+                var offsets = FormationManager.Offsets(t, group.Count, 68f);
+
+                for (int i = 0; i < group.Count; i++)
+                {
+                    var s = group[i];
+                    if (s == null || s.IsDead) continue;
+                    Vector2 pos = center + NavalMath.Rotate(offsets[i], -heading);
+                    if (NavGrid.I != null) pos = NavGrid.I.NearestNavigable(pos, s.Stats.draft);
+                    s.Position = pos;
+                    s.Heading = heading;
+                }
+            }
+        }
+
+        public void RestartSameMode() => BeginMatch(Mode, Random.Range(1, 999999));
+
+        public void ReturnToMenu()
+        {
+            ClearBattlefield();
+            EnterMenu();
+        }
+
+        public void NextMode()
+        {
+            GameMode next;
+            switch (Mode)
+            {
+                case GameMode.Domination: next = GameMode.Skirmish; break;
+                case GameMode.Skirmish: next = GameMode.FleetBattle; break;
+                case GameMode.FleetBattle: next = GameMode.CaptureAndControl; break;
+                case GameMode.CaptureAndControl: next = GameMode.Escort; break;
+                default: next = GameMode.Domination; break;
+            }
+            BeginMatch(next, Random.Range(1, 999999));
+        }
+
+        // ------------------------------------------------------------------ repair pool
+
+        public float RepairSupply(Team t) => _repair[(int)t];
+
+        public bool TrySpendRepair(Team t, float amount)
+        {
+            int i = (int)t;
+            if (_repair[i] < amount) return false;
+            _repair[i] -= amount;
+            return true;
+        }
+
+        // ------------------------------------------------------------------ update
+
+        void Update()
+        {
+            HandleGlobalKeys();
+
+            if (Phase == GamePhase.Deployment) { DeploymentDrag(); return; }
+            if (Phase != GamePhase.Battle) return;
+
+            float dt = Time.deltaTime;
+            BattleTime += dt;
+
+            for (int i = 0; i < 2; i++) _repair[i] = Mathf.Min(100f, _repair[i] + 0.35f * dt);
+
+            ServicePorts(dt);
+            TickScore(dt);
+            RecomputePoints();
+            CheckEndConditions();
+        }
+
+        void HandleGlobalKeys()
+        {
+            if (InputHub.KeyDown(Key.P)) SetSpeed(GameSpeed > 0f ? 0f : 1f);
+
+            if (InputHub.KeyDown(Key.Equals) || InputHub.KeyDown(Key.NumpadPlus)) CycleSpeed(+1);
+            if (InputHub.KeyDown(Key.Minus) || InputHub.KeyDown(Key.NumpadMinus)) CycleSpeed(-1);
+        }
+
+        void DeploymentDrag()
+        {
+            var cam = RTSCamera.I;
+            if (cam == null || UIManager.IsPointerOverUI(InputHub.MousePosition)) return;
+
+            Vector2 world = cam.ScreenToWorld(InputHub.MousePosition);
+
+            if (InputHub.LeftDown && SelectionManager.I != null)
+            {
+                var s = SelectionManager.I.ShipAtScreen(InputHub.MousePosition, false);
+                if (s != null && s.team == Team.Player) { _dragShip = s; _draggingDeploy = true; }
+            }
+            if (!InputHub.LeftHeld) { _draggingDeploy = false; _dragShip = null; }
+
+            if (_draggingDeploy && _dragShip != null)
+            {
+                var map = WorldMap.I;
+                Vector2 target = world;
+                // a ship may be repositioned anywhere inside its own squadron's deployment area,
+                // and dragging it toward another group's area hands it over to that group
+                Vector2 groupCenter = map.NearestDeployCenter(Team.Player, target);
+                Vector2 fromCenter = target - groupCenter;
+                if (fromCenter.magnitude > map.DeployRadius)
+                    target = groupCenter + fromCenter.normalized * map.DeployRadius;
+                if (NavGrid.I != null) target = NavGrid.I.NearestNavigable(target, _dragShip.Stats.draft);
+                _dragShip.Position = target;
+                _dragShip.Heading = NavalMath.VectorToHeading(Vector2.zero - target);
+            }
+        }
+
+        void ServicePorts(float dt)
+        {
+            var map = WorldMap.I;
+            if (map == null) return;
+            for (int p = 0; p < map.Ports.Count; p++)
+            {
+                var port = map.Ports[p];
+                if (port == null || port.IsDestroyed) continue;
+                var ships = ShipRegistry.InRadius(port.Position, port.serviceRadius, port.team);
+                for (int i = 0; i < ships.Count; i++)
+                    port.ServiceShip(ships[i], dt);
+            }
+        }
+
+        void TickScore(float dt)
+        {
+            var map = WorldMap.I;
+            if (map == null) return;
+            for (int i = 0; i < map.Zones.Count; i++)
+            {
+                var z = map.Zones[i];
+                if (z == null) continue;
+                if (z.Owner == Team.Player) PlayerScore += ZonePointsPerSecond * dt;
+                else if (z.Owner == Team.Enemy) EnemyScore += ZonePointsPerSecond * dt;
+            }
+        }
+
+        void RecomputePoints()
+        {
+            FleetPoints = 0; EnemyFleetPoints = 0;
+            var p = ShipRegistry.OfTeam(Team.Player);
+            for (int i = 0; i < p.Count; i++)
+                if (!p[i].IsDead) FleetPoints += Mathf.RoundToInt(p[i].Stats.fleetPointCost * 10f * p[i].HealthFraction);
+            var e = ShipRegistry.OfTeam(Team.Enemy);
+            for (int i = 0; i < e.Count; i++)
+                if (!e[i].IsDead) EnemyFleetPoints += Mathf.RoundToInt(e[i].Stats.fleetPointCost * 10f * e[i].HealthFraction);
+        }
+
+        void CheckEndConditions()
+        {
+            int playerAlive = ShipRegistry.AliveCount(Team.Player);
+            int enemyAlive = ShipRegistry.AliveCount(Team.Enemy);
+
+            if (Mode == GameMode.Escort)
+            {
+                int transportsAlive = 0, arrived = 0;
+                for (int i = 0; i < _transports.Count; i++)
+                {
+                    var t = _transports[i];
+                    if (t == null || t.IsDead) continue;
+                    transportsAlive++;
+                    if (Vector2.Distance(t.Position, WorldMap.I.EscortDestination) < 160f) arrived++;
+                }
+                if (arrived > 0) { End(true, arrived + " transport(s) reached the anchorage."); return; }
+                if (transportsAlive == 0) { End(false, "The convoy was destroyed."); return; }
+            }
+
+            if (enemyAlive == 0) { End(true, "The enemy fleet has been sunk."); return; }
+            if (playerAlive == 0) { End(false, "Our fleet has been lost."); return; }
+
+            if (Mode == GameMode.Domination || Mode == GameMode.CaptureAndControl)
+            {
+                if (PlayerScore >= ScoreToWin) { End(true, "Objective points secured."); return; }
+                if (EnemyScore >= ScoreToWin) { End(false, "The enemy secured the objective points."); return; }
+            }
+
+            if (BattleTime >= TimeLimit)
+            {
+                bool win;
+                if (Mode == GameMode.Domination || Mode == GameMode.CaptureAndControl)
+                    win = PlayerScore > EnemyScore || (Mathf.Approximately(PlayerScore, EnemyScore) && FleetPoints > EnemyFleetPoints);
+                else
+                    win = FleetPoints > EnemyFleetPoints;
+                End(win, "Time limit reached.");
+            }
+        }
+
+        void End(bool victory, string reason)
+        {
+            if (Phase == GamePhase.Victory || Phase == GamePhase.Defeat) return;
+            Phase = victory ? GamePhase.Victory : GamePhase.Defeat;
+            ApplyTimeScale();
+
+            ResultSummary =
+                reason + "\n\n" +
+                "Objective points: " + Mathf.RoundToInt(PlayerScore) + " vs " + Mathf.RoundToInt(EnemyScore) + "\n" +
+                "Enemy ships sunk: " + PlayerKills + " / " + EnemyStartCount + "\n" +
+                "Ships lost: " + EnemyKills + " / " + PlayerStartCount + "\n" +
+                "Fleet strength: " + FleetPoints + " vs " + EnemyFleetPoints + "\n" +
+                "Time: " + Mathf.FloorToInt(BattleTime / 60f) + "m " + Mathf.FloorToInt(BattleTime % 60f) + "s";
+
+            AudioManager.PlayUI(victory ? SoundId.Victory : SoundId.Defeat, 1f);
+        }
+
+        void OnEnable() { GameEvents.OnShipDestroyed += OnShipDestroyed; }
+        void OnDisable() { GameEvents.OnShipDestroyed -= OnShipDestroyed; }
+
+        void OnShipDestroyed(Ship victim, Ship killer)
+        {
+            if (victim == null) return;
+            if (victim.team == Team.Enemy) { PlayerKills++; PlayerScore += KillPoints; }
+            else if (victim.team == Team.Player) { EnemyKills++; EnemyScore += KillPoints; }
+        }
+
+        public string DeploymentBriefing()
+        {
+            int dd = ShipRegistry.AliveCount(Team.Player, ShipClassType.Destroyer);
+            int ca = ShipRegistry.AliveCount(Team.Player, ShipClassType.Cruiser);
+            int bb = ShipRegistry.AliveCount(Team.Player, ShipClassType.Battleship);
+            int ss = ShipRegistry.AliveCount(Team.Player, ShipClassType.Submarine);
+            int tr = ShipRegistry.AliveCount(Team.Player, ShipClassType.Transport);
+
+            string comp = bb + " battleships, " + ca + " cruisers, " + dd + " destroyers, " + ss + " submarines"
+                        + (tr > 0 ? ", " + tr + " transports" : "");
+
+            return
+                "MISSION: " + ModeName + "   -   " + ObjectiveText + "\n\n" +
+                "TASK FORCE: " + comp + "\n" +
+                "WEATHER: " + (WeatherSystem.I != null ? WeatherSystem.I.Describe() : "Clear") + "\n\n" +
+                "The fleet is deployed in three squadrons - LEFT, CENTRE and RIGHT - pre-bound to keys 1, 2 and 3. " +
+                "Drag ships to reposition them inside their deployment area (drag one across to hand it to another group) " +
+                "and pick a starting formation.\n\n" +
+                (Setup.startAsCaptain
+                    ? "You start at the helm of your " + Setup.controlClass.ToString().ToLower() + "; press Tab for fleet command."
+                    : "You start in fleet command; press Tab to take the helm of the selected ship.") +
+                "  F4 shows the full command reference.";
+        }
+    }
+}
