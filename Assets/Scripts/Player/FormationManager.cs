@@ -117,6 +117,8 @@ namespace Naval
                 case FormationType.Wedge: return "Wedge";
                 case FormationType.Circle: return "Circle";
                 case FormationType.DefensiveScreen: return "Defensive Screen";
+                case FormationType.DoubleColumn: return "Double Column";
+                case FormationType.ScreenedCarrierCore: return "Screened Carrier Core";
                 default: return "None";
             }
         }

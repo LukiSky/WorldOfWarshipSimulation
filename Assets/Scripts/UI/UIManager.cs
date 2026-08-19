@@ -25,9 +25,23 @@ namespace Naval
             public Color color;
         }
 
+        /// <summary>Drag-anywhere-on-the-track integer slider, hit tested like the buttons.</summary>
+        class UISlider
+        {
+            public RectTransform track;
+            public Image fill;
+            public Text readout;
+            public int min, max;
+            public System.Func<int> get;
+            public System.Action<int> set;
+            public System.Func<bool> visible;
+            public bool dragging;
+        }
+
         Canvas _canvas;
         Font _font;
         readonly List<UIButton> _buttons = new List<UIButton>();
+        readonly List<UISlider> _sliders = new List<UISlider>();
         static readonly List<RectTransform> _blockers = new List<RectTransform>();
 
         // top bar
@@ -80,7 +94,9 @@ namespace Naval
 
         RectTransform _minimapRect;
         FleetSetup _menuSetup = FleetSetup.Default();
+        MapConfig _menuMap = MapConfig.ForPreset(MapPreset.OceanArchipelago);
         Text _aiDebugText;
+        Text _mapSummaryText;
 
         public bool HelpVisible { get; private set; }
 
@@ -571,74 +587,187 @@ namespace Naval
 
         // ------------------------------------------------------------------ fleet selection menu
 
+        UISlider Slider(string name, Transform parent, Vector2 offMin, Vector2 offMax,
+                        int min, int max, System.Func<int> get, System.Action<int> set)
+        {
+            var track = Panel(name + "Track", parent, new Vector2(0f, 1f), new Vector2(0f, 1f),
+                offMin, offMax, new Color(0f, 0f, 0f, 0.5f), false);
+
+            var fillGo = new GameObject(name + "Fill", typeof(RectTransform));
+            fillGo.transform.SetParent(track, false);
+            var frt = (RectTransform)fillGo.transform;
+            frt.anchorMin = Vector2.zero; frt.anchorMax = Vector2.one;
+            frt.offsetMin = new Vector2(2f, 2f); frt.offsetMax = new Vector2(-2f, -2f);
+            frt.pivot = new Vector2(0f, 0.5f);
+            var fill = fillGo.AddComponent<Image>();
+            fill.color = new Color(0.2f, 0.55f, 0.75f, 0.95f);
+
+            var readout = Label(name + "Val", track, "", 15, TextAnchor.MiddleCenter, TextMain,
+                Vector2.zero, Vector2.one, Vector2.zero, Vector2.zero, FontStyle.Bold);
+
+            var s = new UISlider { track = track, fill = fill, readout = readout, min = min, max = max, get = get, set = set };
+            _sliders.Add(s);
+            return s;
+        }
+
         void BuildFleetMenu()
         {
             var p = Panel("FleetMenu", _canvas.transform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f),
-                new Vector2(-430f, -280f), new Vector2(430f, 280f), new Color(0.04f, 0.08f, 0.13f, 0.97f));
+                new Vector2(-440f, -390f), new Vector2(440f, 390f), new Color(0.04f, 0.08f, 0.13f, 0.97f));
             _menuPanel = p.gameObject;
 
-            Label("MenuTitle", p, "TASK FORCE COMPOSITION", 28, TextAnchor.UpperCenter, Accent,
-                new Vector2(0f, 1f), new Vector2(1f, 1f), new Vector2(0f, -54f), new Vector2(0f, -14f), FontStyle.Bold);
-            Label("MenuSub", p, "Both fleets field " + GameManager.FleetSize + " ships. Choose yours, then pick the ship you will command.",
-                14, TextAnchor.UpperCenter, TextDim,
-                new Vector2(0f, 1f), new Vector2(1f, 1f), new Vector2(0f, -78f), new Vector2(0f, -56f));
+            Label("MenuTitle", p, "BATTLE SETUP", 28, TextAnchor.UpperCenter, Accent,
+                new Vector2(0f, 1f), new Vector2(1f, 1f), new Vector2(0f, -50f), new Vector2(0f, -12f), FontStyle.Bold);
 
-            var classes = new[] { ShipClassType.Battleship, ShipClassType.Cruiser, ShipClassType.Destroyer, ShipClassType.Submarine };
+            // ---- fleet sizes -------------------------------------------------
+            Label("PC", p, "YOUR FLEET", 14, TextAnchor.MiddleLeft, TextMain,
+                new Vector2(0f, 1f), new Vector2(0f, 1f), new Vector2(30f, -86f), new Vector2(170f, -60f), FontStyle.Bold);
+            Slider("PlayerCount", p, new Vector2(176f, -86f), new Vector2(560f, -60f),
+                FleetSetup.MinShips, FleetSetup.MaxShips,
+                () => _menuSetup.playerShipCount, v => _menuSetup.playerShipCount = v);
+
+            Label("EC", p, "ENEMY FLEET", 14, TextAnchor.MiddleLeft, TextMain,
+                new Vector2(0f, 1f), new Vector2(0f, 1f), new Vector2(30f, -120f), new Vector2(170f, -94f), FontStyle.Bold);
+            Slider("EnemyCount", p, new Vector2(176f, -120f), new Vector2(560f, -94f),
+                FleetSetup.MinShips, FleetSetup.MaxShips,
+                () => _menuSetup.enemyShipCount, v => _menuSetup.enemyShipCount = v);
+
+            Button("MATCH", p, new Vector2(0f, 1f), new Vector2(0f, 1f), new Vector2(576f, -120f), new Vector2(676f, -60f),
+                () => { _menuSetup.enemyShipCount = _menuSetup.playerShipCount; });
+
+            // ---- composition mode --------------------------------------------
+            Label("CM", p, "ENEMY COMPOSITION", 14, TextAnchor.MiddleLeft, TextMain,
+                new Vector2(0f, 1f), new Vector2(0f, 1f), new Vector2(30f, -160f), new Vector2(210f, -134f), FontStyle.Bold);
+            var modes = new[] { FleetCompositionMode.Balanced, FleetCompositionMode.Custom, FleetCompositionMode.Mirror };
+            var modeNames = new[] { "BALANCED", "CUSTOM SLOTS", "MIRROR MINE" };
+            for (int i = 0; i < modes.Length; i++)
+            {
+                var m = modes[i];
+                float x = 216f + i * 156f;
+                Button(modeNames[i], p, new Vector2(0f, 1f), new Vector2(0f, 1f),
+                    new Vector2(x, -162f), new Vector2(x + 148f, -132f),
+                    () => { _menuSetup.compositionMode = m; }, null, () => _menuSetup.compositionMode == m);
+            }
+
+            // ---- per class allocation (custom mode) ---------------------------
+            var classes = new[] { ShipClassType.Battleship, ShipClassType.Carrier, ShipClassType.Cruiser,
+                                  ShipClassType.Destroyer, ShipClassType.Submarine };
             var blurbs = new[]
             {
-                "Very slow, sluggish, massive health and armour, devastating slow-reloading guns.",
-                "Balanced speed and health, strong utility: hydro search and surveillance radar.",
-                "Fastest and most agile, low health, quick guns, torpedoes and smoke.",
-                "Stealthy and fragile. Dives to hide, hunts with homing torpedoes and sonar."
+                "Slow and sluggish, huge health and armour, devastating slow guns.",
+                "Fights through its air wing: strikes far beyond gun range, weak up close.",
+                "Balanced, strong utility: hydroacoustic search and surveillance radar.",
+                "Fastest and most agile, fragile, quick guns, torpedoes and smoke.",
+                "Stealthy and fragile. Dives to hide, hunts with homing torpedoes."
             };
 
             for (int i = 0; i < classes.Length; i++)
             {
                 var cls = classes[i];
-                float y = -104f - i * 66f;
+                float y = -196f - i * 52f;
 
-                Label("Cls" + i, p, ShipDatabase.ShortTag(cls) + "  " + cls.ToString().ToUpper(), 17, TextAnchor.UpperLeft, TextMain,
-                    new Vector2(0f, 1f), new Vector2(0f, 1f), new Vector2(30f, y - 22f), new Vector2(230f, y), FontStyle.Bold);
-                Label("Blurb" + i, p, blurbs[i], 12, TextAnchor.UpperLeft, TextDim,
-                    new Vector2(0f, 1f), new Vector2(1f, 1f), new Vector2(30f, y - 42f), new Vector2(-330f, y - 22f));
+                Label("Cls" + i, p, ShipDatabase.ShortTag(cls) + "  " + cls.ToString().ToUpper(), 15, TextAnchor.UpperLeft, TextMain,
+                    new Vector2(0f, 1f), new Vector2(0f, 1f), new Vector2(30f, y - 20f), new Vector2(220f, y), FontStyle.Bold);
+                Label("Blurb" + i, p, blurbs[i], 11, TextAnchor.UpperLeft, TextDim,
+                    new Vector2(0f, 1f), new Vector2(1f, 1f), new Vector2(30f, y - 36f), new Vector2(-360f, y - 18f));
 
-                Button("-", p, new Vector2(1f, 1f), new Vector2(1f, 1f), new Vector2(-322f, y - 34f), new Vector2(-288f, y),
-                    () => { _menuSetup.Adjust(cls, -1); }, () => _menuSetup.CountOf(cls) > 0);
+                Button("-", p, new Vector2(1f, 1f), new Vector2(1f, 1f), new Vector2(-352f, y - 30f), new Vector2(-320f, y),
+                    () => { _menuSetup.Adjust(cls, -1); },
+                    () => _menuSetup.compositionMode == FleetCompositionMode.Custom && _menuSetup.CountOf(cls) > 0);
 
-                var count = Label("Count" + i, p, "", 20, TextAnchor.MiddleCenter, TextMain,
-                    new Vector2(1f, 1f), new Vector2(1f, 1f), new Vector2(-286f, y - 34f), new Vector2(-244f, y), FontStyle.Bold);
+                var count = Label("Count" + i, p, "", 18, TextAnchor.MiddleCenter, TextMain,
+                    new Vector2(1f, 1f), new Vector2(1f, 1f), new Vector2(-318f, y - 30f), new Vector2(-280f, y), FontStyle.Bold);
                 count.name = "MenuCount_" + cls;
 
-                Button("+", p, new Vector2(1f, 1f), new Vector2(1f, 1f), new Vector2(-242f, y - 34f), new Vector2(-208f, y),
-                    () => { _menuSetup.Adjust(cls, +1); }, () => _menuSetup.Total < GameManager.FleetSize);
+                Button("+", p, new Vector2(1f, 1f), new Vector2(1f, 1f), new Vector2(-278f, y - 30f), new Vector2(-246f, y),
+                    () => { _menuSetup.Adjust(cls, +1); },
+                    () => _menuSetup.compositionMode == FleetCompositionMode.Custom);
 
-                Button("COMMAND", p, new Vector2(1f, 1f), new Vector2(1f, 1f), new Vector2(-196f, y - 34f), new Vector2(-30f, y),
+                Button("COMMAND", p, new Vector2(1f, 1f), new Vector2(1f, 1f), new Vector2(-238f, y - 30f), new Vector2(-100f, y),
                     () => { _menuSetup.controlClass = cls; },
-                    () => _menuSetup.CountOf(cls) > 0,
-                    () => _menuSetup.controlClass == cls);
+                    null, () => _menuSetup.controlClass == cls);
             }
 
-            _menuTotalText = Label("Total", p, "", 17, TextAnchor.MiddleCenter, TextMain,
-                new Vector2(0f, 0f), new Vector2(1f, 0f), new Vector2(0f, 100f), new Vector2(0f, 128f), FontStyle.Bold);
+            // ---- battlefield --------------------------------------------------
+            Label("MapHdr", p, "BATTLEFIELD", 14, TextAnchor.MiddleLeft, TextMain,
+                new Vector2(0f, 1f), new Vector2(0f, 1f), new Vector2(30f, -486f), new Vector2(200f, -460f), FontStyle.Bold);
 
-            // how the match starts: commanding the whole fleet, or conning one ship
+            var presets = new[] { MapPreset.OceanArchipelago, MapPreset.OpenSea, MapPreset.StraitClash };
+            var presetNames = new[] { "ARCHIPELAGO", "OPEN SEA", "STRAIT CLASH" };
+            for (int i = 0; i < presets.Length; i++)
+            {
+                var mp = presets[i];
+                float x = 176f + i * 150f;
+                Button(presetNames[i], p, new Vector2(0f, 1f), new Vector2(0f, 1f),
+                    new Vector2(x, -488f), new Vector2(x + 142f, -458f),
+                    () => { _menuMap = MapConfig.ForPreset(mp); },      // preset resets its own defaults
+                    null, () => _menuMap.preset == mp);
+            }
+
+            // island density
+            Label("DenHdr", p, "ISLANDS", 12, TextAnchor.MiddleLeft, TextDim,
+                new Vector2(0f, 1f), new Vector2(0f, 1f), new Vector2(30f, -520f), new Vector2(120f, -496f));
+            var densities = new[] { IslandDensity.Low, IslandDensity.Medium, IslandDensity.High, IslandDensity.Procedural };
+            var densityNames = new[] { "LOW", "MED", "HIGH", "RANDOM" };
+            for (int i = 0; i < densities.Length; i++)
+            {
+                var d = densities[i];
+                float x = 122f + i * 74f;
+                Button(densityNames[i], p, new Vector2(0f, 1f), new Vector2(0f, 1f),
+                    new Vector2(x, -522f), new Vector2(x + 68f, -496f),
+                    () => { _menuMap.islandDensity = d; }, null, () => _menuMap.islandDensity == d);
+            }
+
+            // weather
+            Label("WxHdr", p, "WEATHER", 12, TextAnchor.MiddleLeft, TextDim,
+                new Vector2(0f, 1f), new Vector2(0f, 1f), new Vector2(424f, -520f), new Vector2(510f, -496f));
+            var weathers = new[] { WeatherType.Clear, WeatherType.Fog, WeatherType.Storm };
+            var weatherNames = new[] { "CLEAR", "FOG", "STORM" };
+            for (int i = 0; i < weathers.Length; i++)
+            {
+                var w = weathers[i];
+                float x = 500f + i * 92f;
+                Button(weatherNames[i], p, new Vector2(0f, 1f), new Vector2(0f, 1f),
+                    new Vector2(x, -522f), new Vector2(x + 86f, -496f),
+                    () => { _menuMap.weather = w; }, null, () => _menuMap.weather == w);
+            }
+
+            // capture radius, shown in metres (1 unit is about 10 m)
+            Label("CapHdr", p, "CAP SIZE", 12, TextAnchor.MiddleLeft, TextDim,
+                new Vector2(0f, 1f), new Vector2(0f, 1f), new Vector2(30f, -554f), new Vector2(120f, -530f));
+            Slider("CapRadius", p, new Vector2(122f, -556f), new Vector2(420f, -530f),
+                Mathf.RoundToInt(MapConfig.MinCaptureRadius), Mathf.RoundToInt(MapConfig.MaxCaptureRadius),
+                () => Mathf.RoundToInt(_menuMap.captureRadius),
+                v => _menuMap.captureRadius = v);
+
+            _mapSummaryText = Label("MapSummary", p, "", 12, TextAnchor.MiddleLeft, TextDim,
+                new Vector2(0f, 1f), new Vector2(1f, 1f), new Vector2(430f, -556f), new Vector2(-30f, -530f));
+
+            _menuTotalText = Label("Total", p, "", 16, TextAnchor.MiddleCenter, TextMain,
+                new Vector2(0f, 0f), new Vector2(1f, 0f), new Vector2(0f, 96f), new Vector2(0f, 124f), FontStyle.Bold);
+
             Label("StartAs", p, "START AS", 12, TextAnchor.MiddleRight, TextDim,
-                new Vector2(0f, 0f), new Vector2(0f, 0f), new Vector2(180f, 66f), new Vector2(268f, 92f));
-            Button("FLEET COMMANDER", p, new Vector2(0f, 0f), new Vector2(0f, 0f), new Vector2(276f, 64f), new Vector2(456f, 94f),
+                new Vector2(0f, 0f), new Vector2(0f, 0f), new Vector2(150f, 62f), new Vector2(238f, 88f));
+            Button("FLEET COMMANDER", p, new Vector2(0f, 0f), new Vector2(0f, 0f), new Vector2(246f, 60f), new Vector2(426f, 90f),
                 () => { _menuSetup.startAsCaptain = false; }, null, () => !_menuSetup.startAsCaptain);
-            Button("SHIP CAPTAIN", p, new Vector2(0f, 0f), new Vector2(0f, 0f), new Vector2(464f, 64f), new Vector2(624f, 94f),
+            Button("SHIP CAPTAIN", p, new Vector2(0f, 0f), new Vector2(0f, 0f), new Vector2(434f, 60f), new Vector2(594f, 90f),
                 () => { _menuSetup.startAsCaptain = true; }, null, () => _menuSetup.startAsCaptain);
 
-            Button("BALANCED PRESET", p, new Vector2(0f, 0f), new Vector2(0f, 0f), new Vector2(30f, 24f), new Vector2(230f, 62f),
+            Button("RESET", p, new Vector2(0f, 0f), new Vector2(0f, 0f), new Vector2(30f, 18f), new Vector2(170f, 52f),
                 () => { _menuSetup = FleetSetup.Default(); });
 
-            Button("LAUNCH BATTLE", p, new Vector2(0.5f, 0f), new Vector2(0.5f, 0f), new Vector2(-130f, 24f), new Vector2(130f, 62f),
-                () => GameManager.I.StartFromMenu(_menuSetup),
-                () => _menuSetup.Total == GameManager.FleetSize &&
-                      (!_menuSetup.startAsCaptain || _menuSetup.CountOf(_menuSetup.controlClass) > 0),
-                null, new Color(0.15f, 0.42f, 0.3f, 0.95f));
+            Button("LAUNCH BATTLE", p, new Vector2(0.5f, 0f), new Vector2(0.5f, 0f), new Vector2(-130f, 18f), new Vector2(130f, 52f),
+                () => GameManager.I.StartFromMenu(_menuSetup, 0, _menuMap),
+                MenuIsValid, null, new Color(0.15f, 0.42f, 0.3f, 0.95f));
 
             _menuPanel.SetActive(false);
+        }
+
+        bool MenuIsValid()
+        {
+            if (_menuSetup.compositionMode == FleetCompositionMode.Custom && _menuSetup.CustomTotal < 1) return false;
+            if (_menuSetup.playerShipCount < FleetSetup.MinShips || _menuSetup.enemyShipCount < FleetSetup.MinShips) return false;
+            return true;
         }
 
         // ------------------------------------------------------------------ overlays
@@ -742,6 +871,7 @@ namespace Naval
 
         void Update()
         {
+            HandleSliders();
             HandleButtons();
             HandleMinimapInput();
 
@@ -756,6 +886,35 @@ namespace Naval
             RefreshWarning();
             RefreshAIDebug();
             RefreshPhasePanels();
+        }
+
+        void HandleSliders()
+        {
+            Vector2 mouse = InputHub.MousePosition;
+            for (int i = 0; i < _sliders.Count; i++)
+            {
+                var s = _sliders[i];
+                if (s.track == null || !s.track.gameObject.activeInHierarchy) { s.dragging = false; continue; }
+
+                bool over = RectTransformUtility.RectangleContainsScreenPoint(s.track, mouse, null);
+                if (InputHub.LeftDown && over) s.dragging = true;
+                if (!InputHub.LeftHeld) s.dragging = false;
+
+                if (s.dragging &&
+                    RectTransformUtility.ScreenPointToLocalPointInRectangle(s.track, mouse, null, out Vector2 local))
+                {
+                    var r = s.track.rect;
+                    float u = Mathf.Clamp01(Mathf.InverseLerp(r.xMin, r.xMax, local.x));
+                    s.set(Mathf.RoundToInt(Mathf.Lerp(s.min, s.max, u)));
+                }
+
+                int v = s.get();
+                float frac = Mathf.InverseLerp(s.min, s.max, v);
+                s.fill.rectTransform.localScale = new Vector3(Mathf.Clamp01(frac), 1f, 1f);
+                s.fill.color = s.dragging || over
+                    ? new Color(0.32f, 0.72f, 0.95f, 0.95f) : new Color(0.2f, 0.55f, 0.75f, 0.95f);
+                s.readout.text = v + " SHIPS";
+            }
         }
 
         void HandleButtons()
@@ -1164,23 +1323,45 @@ namespace Naval
 
         void RefreshMenu()
         {
-            var classes = new[] { ShipClassType.Battleship, ShipClassType.Cruiser, ShipClassType.Destroyer, ShipClassType.Submarine };
+            bool custom = _menuSetup.compositionMode == FleetCompositionMode.Custom;
+            var classes = new[] { ShipClassType.Battleship, ShipClassType.Carrier, ShipClassType.Cruiser,
+                                  ShipClassType.Destroyer, ShipClassType.Submarine };
+
+            // in the automatic modes the per-class rows show what the generator will actually build
+            var preview = custom ? null : FleetSetup.BalancedFor(_menuSetup.playerShipCount);
+
             for (int i = 0; i < classes.Length; i++)
             {
                 var t = _menuPanel.transform.Find("MenuCount_" + classes[i]);
-                if (t != null)
-                {
-                    var txt = t.GetComponent<Text>();
-                    if (txt != null) txt.text = _menuSetup.CountOf(classes[i]).ToString();
-                }
+                if (t == null) continue;
+                var txt = t.GetComponent<Text>();
+                if (txt == null) continue;
+
+                int n;
+                if (custom) n = _menuSetup.CountOf(classes[i]);
+                else { n = 0; for (int k = 0; k < preview.Count; k++) if (preview[k] == classes[i]) n++; }
+
+                txt.text = n.ToString();
+                txt.color = custom ? TextMain : TextDim;
             }
 
-            int total = _menuSetup.Total;
-            bool ok = total == GameManager.FleetSize;
+            int player = custom ? _menuSetup.CustomTotal : _menuSetup.playerShipCount;
+            int enemy = _menuSetup.compositionMode == FleetCompositionMode.Mirror
+                ? _menuSetup.enemyShipCount : _menuSetup.enemyShipCount;
+
+            string mode = _menuSetup.compositionMode == FleetCompositionMode.Mirror ? "mirroring your composition"
+                        : _menuSetup.compositionMode == FleetCompositionMode.Custom ? "your manual slots vs a balanced enemy"
+                        : "balanced on both sides";
+
+            if (_mapSummaryText != null)
+                _mapSummaryText.text = _menuMap.LayoutName + "  -  " +
+                    Mathf.RoundToInt(_menuMap.captureRadius * 10f) + " m caps";
+
+            bool ok = MenuIsValid();
             _menuTotalText.text = ok
-                ? "FLEET READY:  " + total + " / " + GameManager.FleetSize + "   -   deploying in three groups (left, centre, right)" +
+                ? player + " v " + enemy + "   -   " + mode +
                   (_menuSetup.startAsCaptain ? "   -   you take the helm of a " + _menuSetup.controlClass.ToString().ToUpper() : "")
-                : "FLEET SIZE  " + total + " / " + GameManager.FleetSize + (total > GameManager.FleetSize ? "  (too many hulls)" : "  (add more hulls)");
+                : "Set at least one ship per side";
             _menuTotalText.color = ok ? new Color(0.5f, 1f, 0.7f) : new Color(1f, 0.75f, 0.4f);
         }
 

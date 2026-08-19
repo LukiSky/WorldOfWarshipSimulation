@@ -9,6 +9,7 @@ namespace Naval
         Station,      // hold the position given
         HoldCap,      // sit inside a zone we own and keep it
         ContestCap,   // get inside a zone we do not own and take it
+        Decap,        // break up an enemy capture in progress and reset the meter
         Screen,       // stand between the objective and the enemy
         Hunt,         // prosecute a submarine, or lie in ambush
         Reserve       // stand off behind the line
@@ -95,6 +96,9 @@ namespace Naval
                 // player ships only reason about their own survival and gunnery
                 if (_s.Navigation.Order == OrderType.AttackMove || _s.Navigation.Order == OrderType.Attack)
                     PlayerAttackAssist();
+                // The air wing is a carrier's main battery, and gunnery is always automatic - so an
+                // uncommanded carrier still flies strikes. The player steers it; the deck crew works.
+                if (_s.Carrier != null) LaunchBestStrike();
                 // fighting smarter is free; steering is not, so we only angle when idle and unordered
                 if (!_s.IsDirectlyControlled && OrderIsIdle) ConsiderAngling();
                 SetState(MapPlayerState(), "player order");
@@ -371,6 +375,18 @@ namespace Naval
             // transports are the whole point in escort missions
             if (e.Stats.classType == ShipClassType.Transport) score += 60f;
 
+            // Chasing a wounded ship away from the objective is worth far less than holding the
+            // objective (utility 30 against 90/95). A cripple running from the point is not worth
+            // following; a healthy one sitting on the point is.
+            if (AssignedZone != null)
+            {
+                float targetToZone = Vector2.Distance(e.Position, AssignedZone.Position);
+                if (targetToZone < AssignedZone.radius * 1.2f)
+                    score += BattleAssessment.UtilityResetEnemyCapTimer * 0.5f;      // he is on our point
+                else if (targetToZone > AssignedZone.radius * 2.5f)
+                    score -= (BattleAssessment.UtilityEnterEmptyFlagZone - BattleAssessment.UtilityPursueLowHpAwayFromFlag) * 0.4f;
+            }
+
             return score;
         }
 
@@ -438,6 +454,10 @@ namespace Naval
             // ---- submarines have their own playbook -------------------------
             if (_s.Submarine != null) { SubmarineThink(); return; }
 
+            // Carriers fight through the air wing, so they never acquire a gunnery target and would
+            // otherwise fall through to the "no contacts" branch and just sit on station.
+            if (_s.Carrier != null) { CarrierThink(_s.CurrentTarget); return; }
+
             // ---- the objective comes before the fight -----------------------
             if (ObjectiveThink()) return;
 
@@ -471,6 +491,7 @@ namespace Naval
                 case ShipClassType.Destroyer: DestroyerThink(target); break;
                 case ShipClassType.Cruiser: CruiserThink(target); break;
                 case ShipClassType.Battleship: BattleshipThink(target); break;
+                case ShipClassType.Carrier: CarrierThink(target); break;
                 default: TransportThink(target); break;
             }
         }
@@ -629,6 +650,75 @@ namespace Naval
             return false;
         }
 
+        /// <summary>
+        /// Decapping: an enemy is on a point and the meter is running. Getting a hull inside the ring
+        /// stops the count immediately, so that comes first - but the real job is killing or driving
+        /// off the capper, and a capper sitting in his own smoke has to be flanked to be seen at all.
+        /// </summary>
+        bool DecapThink()
+        {
+            var z = AssignedZone;
+            if (z == null) return false;
+
+            var nav = _s.Navigation;
+            float dist = Vector2.Distance(_s.Position, z.Position);
+            bool inside = dist < z.radius * 0.9f;
+
+            // HE resets modules and starts fires: far more reliable for breaking up a cap than
+            // hoping for an armour-piercing citadel on a nimble destroyer
+            if (_s.Abilities != null && _s.Abilities.Has(AbilityId.ShellHE))
+                _s.Abilities.Use(AbilityId.ShellHE);
+
+            // who is actually taking it from us?
+            Ship capper = null;
+            float bestD = z.radius * 1.3f;
+            var foes = ShipRegistry.OfTeam(Teams.Opponent(_s.team));
+            for (int i = 0; i < foes.Count; i++)
+            {
+                var e = foes[i];
+                if (e == null || e.IsDead || e.Damage.IsSinking) continue;
+                float d = Vector2.Distance(e.Position, z.Position);
+                if (d < bestD) { bestD = d; capper = e; }
+            }
+
+            if (capper != null)
+            {
+                ManualTarget = capper;
+                _s.CurrentTarget = capper;
+
+                // if we cannot see him he is probably sitting in smoke: swing around the perimeter
+                // to open a fresh line of sight rather than staring into the cloud
+                bool canSee = DetectionSystem.I == null || DetectionSystem.I.IsVisible(capper, _s.team);
+                if (!canSee && _intel != null && _intel.UsesInference)
+                {
+                    SetState(AIState.Searching, "flanking the smoke on " + z.zoneName);
+                    Vector2 radial = (_s.Position - capper.Position).normalized;
+                    Vector2 flank = new Vector2(-radial.y, radial.x) * ((_s.id % 2 == 0) ? 1f : -1f);
+                    Vector2 around = capper.Position + (radial + flank).normalized * z.radius * 0.85f;
+                    nav.SpeedScale = 1f;
+                    nav.SteerDirect(WorldMap.I != null ? WorldMap.I.Clamp(around) : around);
+                    return true;
+                }
+            }
+
+            if (!inside)
+            {
+                // contesting stops the meter the instant we are in the circle
+                SetState(AIState.Tracking, "resetting " + z.zoneName);
+                nav.SpeedScale = 1f;
+                Vector2 entry = z.Position + (_s.Position - z.Position).normalized * z.radius * 0.5f;
+                nav.SteerDirect(WorldMap.I != null ? WorldMap.I.Clamp(entry) : entry);
+                return true;
+            }
+
+            SetState(AIState.Attacking, "denying " + z.zoneName);
+            float angle = NavalMath.VectorToHeading(_s.Position - z.Position) + 50f;
+            Vector2 orbit = z.Position + NavalMath.HeadingToVector(angle) * z.radius * 0.6f;
+            nav.SpeedScale = 0.8f;
+            nav.SteerDirect(WorldMap.I != null ? WorldMap.I.Clamp(orbit) : orbit, 0.8f);
+            return true;
+        }
+
         /// <summary>Rough damage one of our salvos would do to a target, for kill securing.</summary>
         float EstimatedSalvoDamage(Ship target)
         {
@@ -647,6 +737,7 @@ namespace Naval
         /// </summary>
         bool ObjectiveThink()
         {
+            if (Assignment == AIAssignment.Decap) return DecapThink();
             if (Assignment != AIAssignment.HoldCap && Assignment != AIAssignment.ContestCap) return false;
             var z = AssignedZone;
             if (z == null) return false;
@@ -804,6 +895,86 @@ namespace Naval
             if (destroyersClose) desired = Mathf.Max(desired, mb.range * 0.85f);
 
             KeepRange(target, desired, 0.85f, 32f);
+        }
+
+        /// <summary>
+        /// Chooses a strike target and sends a squadron. Runs for both AI and player carriers, since
+        /// gunnery is automatic for every other class too.
+        /// </summary>
+        void LaunchBestStrike()
+        {
+            var cv = _s.Carrier;
+            if (cv == null || !cv.CanLaunch) return;
+
+            Ship best = null;
+            float bestScore = float.MinValue;
+            for (int i = 0; i < _visibleEnemies.Count; i++)
+            {
+                var e = _visibleEnemies[i];
+                if (e == null || e.IsDead || e.Damage.IsSinking) continue;
+                if (e.Submarine != null && e.Submarine.IsSubmerged) continue;   // aircraft cannot hit a dived boat
+                float d = _s.DistanceTo(e);
+                if (d > cv.StrikeRange) continue;
+
+                // hit what hurts most and what cannot shoot back at the planes
+                float score = 100f - d * 0.02f;
+                score += (1f - e.HealthFraction) * 40f;
+                score -= e.Stats.aaRating * 0.35f;
+                if (e.Stats.classType == ShipClassType.Carrier) score += 70f;      // kill their air power first
+                if (e.Stats.classType == ShipClassType.Battleship) score += 25f;
+                if (e.Stats.classType == ShipClassType.Transport) score += 60f;
+                if (AssignedZone != null &&
+                    Vector2.Distance(e.Position, AssignedZone.Position) < AssignedZone.radius * 1.3f) score += 45f;
+
+                if (score > bestScore) { bestScore = score; best = e; }
+            }
+            if (best != null) cv.Launch(best);
+        }
+
+        /// <summary>
+        /// A carrier is a floating airfield, not a warship. It runs away from everything, sits behind
+        /// its own fleet, and hits things hundreds of units beyond the range of any gun on the map.
+        /// </summary>
+        void CarrierThink(Ship target)
+        {
+            var nav = _s.Navigation;
+            var cv = _s.Carrier;
+            if (cv == null) { TransportThink(target); return; }
+
+            LaunchBestStrike();
+
+            // ---- keep the deck safe ------------------------------------------
+            Ship threat = null;
+            float threatDist = float.MaxValue;
+            for (int i = 0; i < _visibleEnemies.Count; i++)
+            {
+                float d = _s.DistanceTo(_visibleEnemies[i]);
+                if (d < threatDist) { threatDist = d; threat = _visibleEnemies[i]; }
+            }
+
+            SetState(cv.Aloft > 0 ? AIState.Attacking : AIState.Searching,
+                     cv.Aloft > 0 ? "strike airborne" : "flight operations");
+
+            // run from anything that can shoot at us, and otherwise tuck in behind the fleet
+            float keepAway = 900f;
+            if (threat != null && threatDist < keepAway)
+            {
+                nav.SpeedScale = 1f;
+                Vector2 away = _s.Position + (_s.Position - threat.Position).normalized * 400f;
+                if (_intel != null && _intel.UsesCover && TryBreakLineOfSight(threat, out Vector2 cover)) away = cover;
+                nav.SteerDirect(WorldMap.I != null ? WorldMap.I.Clamp(away) : away);
+                return;
+            }
+
+            // hold station behind the friendly line
+            Vector2 anchor = HasStation ? StationPoint : _s.Position;
+            if (_intel != null && _intel.Contacts.Count > 0)
+            {
+                Vector2 back = (_s.Position - _intel.ThreatCentroid).normalized;
+                anchor = _intel.FleetCenter + back * 520f;
+            }
+            nav.SpeedScale = 0.7f;
+            nav.SteerDirect(WorldMap.I != null ? WorldMap.I.Clamp(anchor) : anchor, 0.7f);
         }
 
         void TransportThink(Ship target)

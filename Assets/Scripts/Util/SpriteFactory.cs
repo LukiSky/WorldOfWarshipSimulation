@@ -159,39 +159,112 @@ namespace Naval
             return s;
         }
 
-        /// <summary>Class icon used by the fleet panel and minimap (drawn in a square, pointing up).</summary>
+        /// <summary>
+        /// NATO-style class symbol used for the overhead marker, the fleet panel and the minimap.
+        /// These are the shapes the player learns to read at a glance, so each one is deliberately
+        /// distinct in silhouette rather than just in detail:
+        ///   DD two overlapping diamonds, CA diamond with one slash, BB diamond with two slashes,
+        ///   CV flat deck with runway arrows, SS downward chevron.
+        /// </summary>
         public static Sprite ClassIcon(ShipClassType cls)
         {
             string key = "icon_" + cls;
             if (_cache.TryGetValue(key, out var s)) return s;
-            int n = 64;
+            int n = 96;
             var tex = NewTex(n, n, key);
             Clear(tex);
+
             switch (cls)
             {
                 case ShipClassType.Destroyer:
-                    FillPolygon(tex, new[]{ new Vector2(0.5f,0.95f), new Vector2(0.70f,0.10f), new Vector2(0.30f,0.10f) }, Color.white);
+                    // two overlapping diamonds
+                    Diamond(tex, new Vector2(0.38f, 0.5f), 0.30f, 0.34f, Color.white);
+                    Diamond(tex, new Vector2(0.62f, 0.5f), 0.30f, 0.34f, Color.white);
                     break;
+
                 case ShipClassType.Cruiser:
-                    FillPolygon(tex, new[]{ new Vector2(0.5f,0.95f), new Vector2(0.82f,0.30f), new Vector2(0.5f,0.06f), new Vector2(0.18f,0.30f) }, Color.white);
+                    // solid diamond cut by a horizontal slash
+                    Diamond(tex, new Vector2(0.5f, 0.5f), 0.40f, 0.44f, Color.white);
+                    EraseRect(tex, 0.10f, 0.472f, 0.90f, 0.528f);
                     break;
+
                 case ShipClassType.Battleship:
-                    FillPolygon(tex, new[]{
-                        new Vector2(0.5f,0.96f), new Vector2(0.86f,0.55f), new Vector2(0.78f,0.08f),
-                        new Vector2(0.22f,0.08f), new Vector2(0.14f,0.55f) }, Color.white);
+                    // solid diamond cut by two diagonal slashes
+                    Diamond(tex, new Vector2(0.5f, 0.5f), 0.44f, 0.48f, Color.white);
+                    EraseSlash(tex, new Vector2(0.10f, 0.26f), new Vector2(0.90f, 0.66f), 0.055f);
+                    EraseSlash(tex, new Vector2(0.10f, 0.50f), new Vector2(0.90f, 0.90f), 0.055f);
                     break;
+
+                case ShipClassType.Carrier:
+                    // flight deck with a runway arrow pointing along the launch axis
+                    FillRect(tex, 0.22f, 0.28f, 0.78f, 0.72f, Color.white);
+                    ErasePolygon(tex, new[]{ new Vector2(0.42f,0.63f), new Vector2(0.66f,0.50f), new Vector2(0.42f,0.37f) });
+                    EraseRect(tex, 0.28f, 0.472f, 0.46f, 0.528f);
+                    break;
+
                 case ShipClassType.Submarine:
-                    FillEllipse(tex, new Vector2(0.5f, 0.5f), 0.22f, 0.44f, Color.white);
-                    FillRect(tex, 0.36f, 0.46f, 0.64f, 0.66f, Color.white);
+                    // downward inverted chevron
+                    FillPolygon(tex, new[]{
+                        new Vector2(0.5f,0.12f), new Vector2(0.92f,0.74f), new Vector2(0.74f,0.86f),
+                        new Vector2(0.5f,0.46f), new Vector2(0.26f,0.86f), new Vector2(0.08f,0.74f) }, Color.white);
                     break;
+
                 default:
-                    FillRect(tex, 0.24f, 0.12f, 0.76f, 0.88f, Color.white);
+                    FillRect(tex, 0.24f, 0.28f, 0.76f, 0.72f, Color.white);
                     break;
             }
+
             Commit(tex);
             s = Sprite.Create(tex, new Rect(0, 0, n, n), new Vector2(0.5f, 0.5f), n, 0, SpriteMeshType.FullRect);
             _cache[key] = s;
             return s;
+        }
+
+        static void Diamond(Texture2D t, Vector2 c, float rx, float ry, Color col)
+        {
+            FillPolygon(t, new[]{
+                new Vector2(c.x, c.y + ry), new Vector2(c.x + rx, c.y),
+                new Vector2(c.x, c.y - ry), new Vector2(c.x - rx, c.y) }, col);
+        }
+
+        /// <summary>Cuts a thick diagonal band out of whatever has been drawn, forming a slash.</summary>
+        static void EraseSlash(Texture2D t, Vector2 a, Vector2 b, float width)
+        {
+            Vector2 d = (b - a).normalized;
+            Vector2 nrm = new Vector2(-d.y, d.x) * width * 0.5f;
+            ErasePolygon(t, new[] { a - nrm, b - nrm, b + nrm, a + nrm });
+        }
+
+        static void EraseRect(Texture2D t, float x0, float y0, float x1, float y1)
+        {
+            ErasePolygon(t, new[] { new Vector2(x0, y0), new Vector2(x1, y0), new Vector2(x1, y1), new Vector2(x0, y1) });
+        }
+
+        /// <summary>
+        /// Clears the alpha inside a polygon. Filling with a transparent colour would not work:
+        /// the rasteriser treats coverage as alpha and would just darken the pixels instead.
+        /// </summary>
+        static void ErasePolygon(Texture2D t, Vector2[] poly)
+        {
+            int w = _bw, h = _bh;
+            for (int y = 0; y < h; y++)
+                for (int x = 0; x < w; x++)
+                {
+                    // supersample so the cut edge is as smooth as the drawn edge
+                    int hits = 0;
+                    for (int sy = 0; sy < SS; sy++)
+                        for (int sx = 0; sx < SS; sx++)
+                        {
+                            float u = (x + (sx + 0.5f) / SS) / w;
+                            float v = (y + (sy + 0.5f) / SS) / h;
+                            if (PointInPoly(poly, u, v)) hits++;
+                        }
+                    if (hits == 0) continue;
+                    float keep = 1f - hits / (float)(SS * SS);
+                    var c = _buf[y * w + x];
+                    c.a *= keep;
+                    _buf[y * w + x] = c;
+                }
         }
 
         // ------------------------------------------------------------------ hull drawing
@@ -234,6 +307,13 @@ namespace Naval
                         new Vector2(0.72f,0.20f), new Vector2(0.62f,0.02f), new Vector2(0.38f,0.02f),
                         new Vector2(0.28f,0.20f), new Vector2(0.28f,0.55f), new Vector2(0.34f,0.86f) };
                     break;
+                case ShipClassType.Carrier:
+                    // a flight deck: near rectangular, wider than the hull beneath it
+                    outline = new[]{
+                        new Vector2(0.50f,1.00f), new Vector2(0.76f,0.92f), new Vector2(0.88f,0.72f),
+                        new Vector2(0.88f,0.16f), new Vector2(0.74f,0.01f), new Vector2(0.26f,0.01f),
+                        new Vector2(0.12f,0.16f), new Vector2(0.12f,0.72f), new Vector2(0.24f,0.92f) };
+                    break;
                 default:
                     outline = new[]{
                         new Vector2(0.50f,0.99f), new Vector2(0.72f,0.84f), new Vector2(0.80f,0.60f),
@@ -271,6 +351,15 @@ namespace Naval
                     FillRect(tex, 0.40f, 0.44f, 0.60f, 0.66f, super);           // conning tower
                     FillRect(tex, 0.46f, 0.62f, 0.54f, 0.76f, dark);            // periscope mast
                     FillRect(tex, 0.30f, 0.30f, 0.70f, 0.34f, dark);            // dive planes
+                    break;
+                case ShipClassType.Carrier:
+                    // angled flight deck with centreline markings and an island to starboard
+                    FillRect(tex, 0.20f, 0.06f, 0.72f, 0.94f, Color.Lerp(deck, Color.black, 0.18f));
+                    FillRect(tex, 0.44f, 0.12f, 0.50f, 0.88f, Color.Lerp(deck, Color.white, 0.35f));
+                    for (int i = 0; i < 6; i++)                                   // deck stripes
+                        FillRect(tex, 0.30f, 0.16f + i * 0.13f, 0.40f, 0.19f + i * 0.13f, Color.Lerp(deck, Color.white, 0.2f));
+                    FillRect(tex, 0.74f, 0.38f, 0.86f, 0.62f, super);            // island superstructure
+                    FillRect(tex, 0.77f, 0.60f, 0.83f, 0.72f, dark);             // funnel and mast
                     break;
                 default:
                     FillRect(tex, 0.34f, 0.60f, 0.66f, 0.74f, super);

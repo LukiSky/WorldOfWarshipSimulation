@@ -394,6 +394,56 @@ namespace Naval
             return false;
         }
 
+        /// <summary>
+        /// Utility weights from the objective specification. These are the numbers that stop the AI
+        /// wandering off to chase a wounded ship while a point ticks down behind it.
+        /// </summary>
+        public const float UtilityEnterEmptyFlagZone = 90f;
+        public const float UtilityResetEnemyCapTimer = 95f;
+        public const float UtilityProtectAlliedCapper = 80f;
+        public const float UtilityPursueLowHpAwayFromFlag = 30f;
+
+        /// <summary>
+        /// A zone the enemy is actively taking from us, or taking from neutral while we have a claim.
+        /// Resetting one of these is the highest value action on the board.
+        /// </summary>
+        public bool TryFindZoneBeingTaken(out ZoneIntel result)
+        {
+            result = default;
+            float best = float.MinValue;
+            for (int i = 0; i < Zones.Length; i++)
+            {
+                var z = Zones[i];
+                if (z.zone == null) continue;
+
+                // someone else is inside and we are not stopping them
+                bool losingIt = z.knownEnemyShips > 0 && z.myShips == 0;
+                if (!losingIt) continue;
+
+                float urgency = z.isMine ? 40f : z.isNeutral ? 20f : 0f;
+                urgency += z.zone.CaptureFraction * 30f;          // nearly captured is nearly lost
+                urgency -= Vector2.Distance(z.Position, FleetCenter) * 0.02f;
+                if (urgency > best) { best = urgency; result = z; }
+            }
+            return best > float.MinValue;
+        }
+
+        /// <summary>Zones one of our ships is currently capturing, which are worth protecting.</summary>
+        public bool TryFindFriendlyCapInProgress(out ZoneIntel result)
+        {
+            result = default;
+            float best = float.MinValue;
+            for (int i = 0; i < Zones.Length; i++)
+            {
+                var z = Zones[i];
+                if (z.zone == null || z.myShips == 0) continue;
+                if (z.isMine && !z.contested) continue;           // already ours and safe
+                float v = 20f + z.zone.CaptureFraction * 25f + (z.contested ? 25f : 0f);
+                if (v > best) { best = v; result = z; }
+            }
+            return best > float.MinValue;
+        }
+
         /// <summary>Highest value zone this team should be working on.</summary>
         public ZoneIntel? BestZone(bool preferOwned)
         {

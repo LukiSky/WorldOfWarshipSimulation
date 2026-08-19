@@ -39,9 +39,23 @@ namespace Naval
         public Vector2 PlayerDeployCenter => PlayerDeployCenters[1];
         public Vector2 EnemyDeployCenter => EnemyDeployCenters[1];
         public float DeployRadius { get; private set; } = 300f;
+
+        /// <summary>
+        /// Sizes the deployment areas to the fleets that will spawn in them. Called before generation
+        /// so island placement leaves the right amount of sea room - a 30 ship fleet needs far more
+        /// than a 6 ship one, and squeezing them into a fixed circle means colliding on the start line.
+        /// </summary>
+        public void ConfigureDeployment(int largestFleet)
+        {
+            int perGroup = Mathf.CeilToInt(Mathf.Max(1, largestFleet) / 3f);
+            DeployRadius = Mathf.Clamp(150f + perGroup * 34f, 200f, 560f);
+        }
         public Vector2 EscortDestination { get; private set; }
 
         public static readonly string[] GroupNames = { "LEFT", "CENTRE", "RIGHT" };
+
+        /// <summary>The battlefield configuration this map was generated from.</summary>
+        public MapConfig Config { get; private set; } = MapConfig.ForPreset(MapPreset.OceanArchipelago);
 
         /// <summary>Nearest friendly squadron spawn to a point, used to clamp deployment dragging.</summary>
         public Vector2 NearestDeployCenter(Team team, Vector2 p)
@@ -68,9 +82,10 @@ namespace Naval
 
         // ------------------------------------------------------------------ generation
 
-        public void Generate(int seed, GameMode mode, int resolution = 512)
+        public void Generate(int seed, GameMode mode, int resolution = 512, MapConfig config = null)
         {
             I = this;
+            if (config != null) Config = config;
             Resolution = resolution;
             Random.InitState(seed);
             NavalMath.SetNoiseSeed(seed);
@@ -84,18 +99,24 @@ namespace Naval
 
         void BuildIslands(GameMode mode)
         {
-            int bigCount = mode == GameMode.Escort ? 7 : 6;
-            int smallCount = 9;
-            int rockCount = 14;
+            float density = Config.DensityScale;
+            int bigCount = Mathf.RoundToInt((mode == GameMode.Escort ? 7 : 6) * density);
+            int smallCount = Mathf.RoundToInt(9 * density);
+            int rockCount = Mathf.RoundToInt(14 * density);
+
+            // Open Sea is exactly that: no cover, so gunnery and angling decide everything
+            if (Config.preset == MapPreset.OpenSea) { bigCount = 0; smallCount = 0; rockCount = Mathf.Min(rockCount, 4); }
 
             // Classic domination layout: the two fleets face each other across the middle of the
             // map, each deploying as three squadrons - left flank, centre, right flank - with the
             // caps strung along the centre line between them.
-            // Baseline distance is a balance: far enough that the approach is a real phase of the
-            // battle, close enough that a battleship is not steaming for six minutes before it can
-            // shoot. At 0.70 a destroyer reaches its cap in about 3 minutes, a battleship in 6.
-            float baseLine = Half * 0.70f;
-            float flank = Half * 0.55f;
+            // Baseline distance comes from the map preset: far enough that the approach is a real
+            // phase of the battle, close enough that a battleship is not steaming for six minutes
+            // before it can shoot.
+            float baseLine = Half * Config.spawnDistance;
+            // Strait Clash puts land where the flanks would normally be, so the squadrons have to
+            // deploy inside the channel or they spawn hard aground.
+            float flank = Config.preset == MapPreset.StraitClash ? Half * 0.11f : Half * 0.55f;
 
             PlayerDeployCenters = new[]
             {
@@ -126,6 +147,32 @@ namespace Naval
                     new Vector2(Half * 0.60f, Half * 0.16f)
                 };
                 EscortDestination = new Vector2(Half * 0.80f, Half * 0.10f);
+            }
+
+            // Strait Clash: two big landmasses on the flanks squeeze the whole battle through a
+            // narrow channel down the middle, with shallow water on either side of it.
+            if (Config.preset == MapPreset.StraitClash)
+            {
+                // the channel has to stay wide enough for a deployed squadron to manoeuvre in
+                float straitHalfWidth = Mathf.Max(Half * 0.30f, DeployRadius + Half * 0.11f + 90f);
+                float massRadius = Half * 0.46f;
+                Islands.Add(new IslandInfo
+                {
+                    center = new Vector2(-straitHalfWidth - massRadius * 0.75f, 0f),
+                    radius = massRadius,
+                    hazard = massRadius + 120f,
+                    isRock = false
+                });
+                Islands.Add(new IslandInfo
+                {
+                    center = new Vector2(straitHalfWidth + massRadius * 0.75f, 0f),
+                    radius = massRadius,
+                    hazard = massRadius + 120f,
+                    isRock = false
+                });
+                // the scattered stuff is thinned right down so the channel stays navigable
+                bigCount = 0;
+                smallCount = Mathf.Min(smallCount, 3);
             }
 
             for (int i = 0; i < bigCount + smallCount + rockCount; i++)
@@ -286,12 +333,30 @@ namespace Naval
                     new Vector2( spread * 0.5f, -Half * 0.34f)
                 };
 
-            return new[]
+            switch (Config.flagLayout)
             {
-                new Vector2(-spread, 0f),   // A, off the left flank
-                Vector2.zero,               // B, dead centre
-                new Vector2(spread, 0f)     // C, off the right flank
-            };
+                case FlagLayout.KingOfTheHill:
+                    // one big prize dead centre: everything converges
+                    return new[] { Vector2.zero };
+
+                case FlagLayout.TwoFlagAssault:
+                    // a flag in front of each base - you win by taking theirs, so both sides must
+                    // decide how much to commit forward and how much to leave at home
+                    float baseLine = Half * Config.spawnDistance;
+                    return new[]
+                    {
+                        new Vector2(0f, -baseLine * 0.55f),   // A, in front of our base
+                        new Vector2(0f,  baseLine * 0.55f)    // B, in front of theirs
+                    };
+
+                default:
+                    return new[]
+                    {
+                        new Vector2(-spread, 0f),   // A, off the left flank
+                        Vector2.zero,               // B, dead centre
+                        new Vector2(spread, 0f)     // C, off the right flank
+                    };
+            }
         }
 
         void PlaceStrategicPoints(GameMode mode)
@@ -308,10 +373,11 @@ namespace Naval
             var names = new[] { "A", "B", "C", "D", "E" };
             var spots = CapSpots(mode);
 
+            float capRadius = Mathf.Clamp(Config.captureRadius, MapConfig.MinCaptureRadius, MapConfig.MaxCaptureRadius);
             for (int i = 0; i < spots.Length; i++)
             {
                 Vector2 p = FindOpenWater(Clamp(spots[i]), 300f, 0.25f);
-                Zones.Add(CaptureZone.Create(transform, p, 150f, names[i % names.Length]));
+                Zones.Add(CaptureZone.Create(transform, p, capRadius, names[i % names.Length]));
             }
         }
 

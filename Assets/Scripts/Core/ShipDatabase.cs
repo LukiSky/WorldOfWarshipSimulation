@@ -21,6 +21,7 @@ namespace Naval
                 yield return ShipClassType.Destroyer;
                 yield return ShipClassType.Cruiser;
                 yield return ShipClassType.Battleship;
+                yield return ShipClassType.Carrier;
                 yield return ShipClassType.Submarine;
             }
         }
@@ -167,6 +168,36 @@ namespace Naval
             };
             _cache[ShipClassType.Submarine] = ss;
 
+            // ------------------------------------------------------------ CARRIER
+            // Fights entirely through its air wing: almost no guns, poor at defending itself,
+            // but it projects damage further than any battleship can shoot.
+            var cv = new ShipStats
+            {
+                classType = ShipClassType.Carrier,
+                className = "Aircraft Carrier",
+                length = 27f, beam = 4.6f, draft = 0.66f,
+                maxSpeed = 4.4f, reverseSpeed = 1.2f, acceleration = 0.4f, deceleration = 0.5f,
+                turnRate = 8f, rudderShift = 1.4f,
+                maxHealth = 5200f, armor = 26f, citadelArmor = 34f,
+                floodRate = 15f, fireRate = 11f,
+                baseDetectability = 560f, spotRange = 620f, sonarRange = 0f, hydroRange = 60f,
+                fuelCapacity = 240f, fuelBurn = 0.28f, repairRate = 1.2f,
+                damageControlCooldown = 90f, damageControlHeal = 0.10f,
+                aaRating = 120f,
+                ammoMain = 200, ammoSecondary = 500, ammoTorpedo = 0, ammoASW = 0,
+                hullColor = new Color(0.34f, 0.37f, 0.42f), deckColor = new Color(0.22f, 0.24f, 0.28f),
+                fleetPointCost = 6,
+                // a handful of light guns for self defence only
+                secondaryBattery = new GunData
+                {
+                    turrets = 6, barrelsPerTurret = 2, damage = 95f, penetration = 20f,
+                    reloadTime = 3.8f, range = 210f, shellSpeed = 205f, dispersion = 16f,
+                    traverseSpeed = 40f, fireChance = 0.06f, frontalArcBlock = 8f
+                },
+                airWing = new AirWingData()
+            };
+            _cache[ShipClassType.Carrier] = cv;
+
             // ---------------------------------------------------------- TRANSPORT
             var tr = new ShipStats
             {
@@ -234,6 +265,7 @@ namespace Naval
                 case ShipClassType.Cruiser: return "CA";
                 case ShipClassType.Battleship: return "BB";
                 case ShipClassType.Submarine: return "SS";
+                case ShipClassType.Carrier: return "CV";
                 default: return "TR";
             }
         }

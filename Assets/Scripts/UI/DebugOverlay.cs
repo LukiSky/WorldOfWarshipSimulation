@@ -193,6 +193,7 @@ namespace Naval
             {
                 case AIAssignment.HoldCap: return new Color(0.4f, 1f, 0.6f);
                 case AIAssignment.ContestCap: return new Color(1f, 0.85f, 0.3f);
+                case AIAssignment.Decap: return new Color(1f, 0.35f, 0.25f);
                 case AIAssignment.Screen: return new Color(0.5f, 0.85f, 1f);
                 case AIAssignment.Hunt: return new Color(1f, 0.5f, 1f);
                 case AIAssignment.Reserve: return new Color(0.7f, 0.7f, 0.8f);

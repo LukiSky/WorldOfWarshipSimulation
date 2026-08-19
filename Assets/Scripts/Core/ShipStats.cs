@@ -65,6 +65,25 @@ namespace Naval
         public SmokeData Clone() => (SmokeData)MemberwiseClone();
     }
 
+    /// <summary>Carrier air group: how many squadrons, how far they reach and what they do on arrival.</summary>
+    [System.Serializable]
+    public class AirWingData
+    {
+        public int squadrons = 3;            // how many can be aloft at once
+        public int aircraftPerSquadron = 6;
+        public float launchInterval = 22f;   // seconds between launches
+        public float strikeRange = 1500f;    // far beyond any gun
+        public float cruiseSpeed = 34f;      // much faster than any hull
+        public float damagePerAircraft = 480f;
+        public float torpedoChance = 0.5f;   // otherwise bombs: less damage, starts fires
+        public float floodChance = 0.45f;
+        public float fireChance = 0.35f;
+        public float rearmTime = 30f;
+        public float aircraftHealth = 100f;
+
+        public AirWingData Clone() => (AirWingData)MemberwiseClone();
+    }
+
     [System.Serializable]
     public class SubmarineData
     {
@@ -131,6 +150,7 @@ namespace Naval
         public ASWData asw;
         public SmokeData smoke;
         public SubmarineData submarine;
+        public AirWingData airWing;
         public float aaRating = 0f;
 
         // Ammunition
@@ -155,6 +175,7 @@ namespace Naval
             s.asw = asw != null ? asw.Clone() : null;
             s.smoke = smoke != null ? smoke.Clone() : null;
             s.submarine = submarine != null ? submarine.Clone() : null;
+            s.airWing = airWing != null ? airWing.Clone() : null;
             return s;
         }
     }

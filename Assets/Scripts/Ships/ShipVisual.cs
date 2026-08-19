@@ -13,6 +13,9 @@ namespace Naval
         GameObject _root;
         SpriteRenderer _hull;
         SpriteRenderer _glow;
+        SpriteRenderer _marker;        // overhead class symbol
+        SpriteRenderer _markerRing;    // contrast backing so the symbol reads over bright water
+        Transform _markerT;
         Transform _glowT;
         Transform _hullT;
         SpriteRenderer[] _turrets;
@@ -38,15 +41,17 @@ namespace Naval
             _root = new GameObject("Visual");
             _root.transform.SetParent(_s.transform, false);
 
-            // team glow behind the hull so ships read at strategic zoom
-            var glowGo = new GameObject("Glow");
+            // Team aura: an elongated ring tracing the hull rather than a soft blob, so it reads as
+            // a waterline silhouette and shows which way the ship is pointing.
+            var glowGo = new GameObject("Aura");
             glowGo.transform.SetParent(_root.transform, false);
             _glow = glowGo.AddComponent<SpriteRenderer>();
-            _glow.sprite = SpriteFactory.SoftCircle(0.05f);
-            _glow.color = new Color(Teams.Color(_s.team).r, Teams.Color(_s.team).g, Teams.Color(_s.team).b, 0.30f);
+            _glow.sprite = SpriteFactory.Ring(0.14f);
+            var tc0 = Teams.Color(_s.team);
+            _glow.color = new Color(tc0.r, tc0.g, tc0.b, 0.42f);
             _glow.sortingOrder = -2;
             _glowT = glowGo.transform;
-            _glowT.localScale = Vector3.one * st.length * 1.5f;
+            _glowT.localScale = new Vector3(st.beam * 2.6f, st.length * 1.18f, 1f);
 
             var hullGo = new GameObject("Hull");
             hullGo.transform.SetParent(_root.transform, false);
@@ -54,6 +59,27 @@ namespace Naval
             _hull.sprite = SpriteFactory.Ship(st.classType, st);
             _hull.sortingOrder = 4;
             _hullT = hullGo.transform;
+
+            // Overhead class marker. This is the thing the player actually reads at range, so it
+            // is drawn above the smoke and particle layers and held at a minimum screen size.
+            var markerGo = new GameObject("Marker");
+            markerGo.transform.SetParent(_root.transform, false);
+            _markerT = markerGo.transform;
+
+            var ringGo = new GameObject("MarkerBacking");
+            ringGo.transform.SetParent(markerGo.transform, false);
+            _markerRing = ringGo.AddComponent<SpriteRenderer>();
+            _markerRing.sprite = SpriteFactory.SoftCircle(0.15f);
+            _markerRing.color = new Color(0f, 0f, 0f, 0.5f);
+            _markerRing.sortingOrder = 90;
+            ringGo.transform.localScale = Vector3.one * 1.7f;
+
+            var symGo = new GameObject("Symbol");
+            symGo.transform.SetParent(markerGo.transform, false);
+            _marker = symGo.AddComponent<SpriteRenderer>();
+            _marker.sprite = SpriteFactory.ClassIcon(st.classType);
+            _marker.color = Teams.Color(_s.team);
+            _marker.sortingOrder = 91;
 
             // turrets
             var mb = st.mainBattery;
@@ -121,8 +147,28 @@ namespace Naval
 
             if (_glowT != null)
             {
-                float glow = Mathf.Max(st * 1.5f * hullScale, ps * 26f);
-                _glowT.localScale = new Vector3(glow, glow, 1f);
+                // hugs the hull, but never shrinks below a readable ring when zoomed out
+                float len = Mathf.Max(st * 1.18f * hullScale, ps * 22f);
+                float beam = Mathf.Max(_s.Stats.beam * 2.6f * hullScale, ps * 12f);
+                _glowT.localScale = new Vector3(beam, len, 1f);
+            }
+
+            if (_markerT != null)
+            {
+                // The symbol keeps a constant size on screen and sits clear of the hull, so it is
+                // legible from a knife fight all the way out to the strategic view. It never
+                // rotates with the ship - a symbol you have to read upside down is no good.
+                // ~34 screen pixels: large enough that the class symbol is actually legible,
+                // small enough that a packed formation does not turn into a wall of icons
+                float size = Mathf.Clamp(ps * 34f, 3f, 120f);
+                _markerT.localScale = new Vector3(size, size, 1f);
+                float lift = st * 0.55f * hullScale + size * 0.85f;
+
+                // The parent carries the hull's rotation, so both the offset and the symbol have to
+                // cancel it - otherwise the marker swings around with the bow and reads upside down.
+                var unrotate = Quaternion.Euler(0f, 0f, _s.Heading);
+                _markerT.localPosition = unrotate * Vector3.up * lift;
+                _markerT.localRotation = unrotate;
             }
 
             if (_turretPivots != null)
@@ -259,6 +305,20 @@ namespace Naval
                 float shrink = 1f - p * 0.35f;
                 _root.transform.localScale = new Vector3(shrink, shrink, 1f);
                 _root.transform.localRotation = Quaternion.Euler(0f, 0f, _s.Movement.ListAngle * 0.35f);
+            }
+
+            // The class marker stays readable through weather and smoke - just dimmed, never hidden.
+            // Losing track of what a contact IS because a smoke cloud drifted over it is the exact
+            // readability problem the marker exists to solve.
+            if (_marker != null)
+            {
+                var mc = Teams.Color(_s.team);
+                float ma = 1f;
+                if (SmokeSystem.I != null && SmokeSystem.I.IsInsideSmoke(_s.Position)) ma = 0.55f;
+                if (_s.Submarine != null && _s.Submarine.IsSubmerged) ma *= 0.65f;
+                if (_s.Damage != null && _s.Damage.IsSinking) ma *= 1f - Mathf.Clamp01(_s.Movement.SinkProgress);
+                _marker.color = new Color(mc.r, mc.g, mc.b, ma);
+                if (_markerRing != null) _markerRing.color = new Color(0f, 0f, 0f, 0.5f * ma);
             }
 
             var c = _hull.color;

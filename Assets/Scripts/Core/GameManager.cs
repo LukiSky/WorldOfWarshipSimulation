@@ -4,18 +4,32 @@ using UnityEngine.InputSystem;
 
 namespace Naval
 {
+    /// <summary>How the enemy fleet is built relative to the player's.</summary>
+    public enum FleetCompositionMode { Balanced, Custom, Mirror }
+
     /// <summary>Fleet composition chosen on the pre-battle screen.</summary>
     public class FleetSetup
     {
-        public int battleships = 4;
-        public int cruisers = 6;
-        public int destroyers = 6;
-        public int submarines = 2;
+        public const int MinShips = 1;
+        public const int MaxShips = 30;
+
+        /// <summary>Hulls per side. The two sides are configured independently.</summary>
+        public int playerShipCount = 6;
+        public int enemyShipCount = 6;
+        public FleetCompositionMode compositionMode = FleetCompositionMode.Balanced;
+
+        // manual per-class allocation, used when compositionMode is Custom
+        public int battleships = 1;
+        public int cruisers = 2;
+        public int destroyers = 2;
+        public int carriers = 0;
+        public int submarines = 1;
+
         public ShipClassType controlClass = ShipClassType.Cruiser;
         /// <summary>Start conning a ship, or start as fleet commander (the default).</summary>
         public bool startAsCaptain = false;
 
-        public int Total => battleships + cruisers + destroyers + submarines;
+        public int CustomTotal => battleships + cruisers + destroyers + carriers + submarines;
 
         public int CountOf(ShipClassType c)
         {
@@ -24,6 +38,7 @@ namespace Naval
                 case ShipClassType.Battleship: return battleships;
                 case ShipClassType.Cruiser: return cruisers;
                 case ShipClassType.Destroyer: return destroyers;
+                case ShipClassType.Carrier: return carriers;
                 case ShipClassType.Submarine: return submarines;
                 default: return 0;
             }
@@ -36,19 +51,64 @@ namespace Naval
                 case ShipClassType.Battleship: battleships = Mathf.Max(0, battleships + delta); break;
                 case ShipClassType.Cruiser: cruisers = Mathf.Max(0, cruisers + delta); break;
                 case ShipClassType.Destroyer: destroyers = Mathf.Max(0, destroyers + delta); break;
+                case ShipClassType.Carrier: carriers = Mathf.Max(0, carriers + delta); break;
                 case ShipClassType.Submarine: submarines = Mathf.Max(0, submarines + delta); break;
             }
         }
 
-        public List<ShipClassType> BuildOrder()
+        /// <summary>
+        /// A sensible mix for an arbitrary fleet size: mostly destroyers and cruisers, a couple of
+        /// battleships, and a carrier only once the fleet is big enough to screen it.
+        /// </summary>
+        public static List<ShipClassType> BalancedFor(int count)
         {
-            // heavies first so they anchor the formation and the light ships screen ahead
+            var l = new List<ShipClassType>();
+            if (count <= 0) return l;
+
+            int carriers = count >= 10 ? 1 : 0;
+            int battleships = Mathf.Clamp(Mathf.RoundToInt(count * 0.22f), count >= 3 ? 1 : 0, count);
+            int subs = count >= 6 ? Mathf.Clamp(Mathf.RoundToInt(count * 0.12f), 1, 4) : 0;
+            int remaining = Mathf.Max(0, count - carriers - battleships - subs);
+            int cruisers = Mathf.RoundToInt(remaining * 0.5f);
+            int destroyers = remaining - cruisers;
+
+            for (int i = 0; i < battleships; i++) l.Add(ShipClassType.Battleship);
+            for (int i = 0; i < carriers; i++) l.Add(ShipClassType.Carrier);
+            for (int i = 0; i < cruisers; i++) l.Add(ShipClassType.Cruiser);
+            for (int i = 0; i < destroyers; i++) l.Add(ShipClassType.Destroyer);
+            for (int i = 0; i < subs; i++) l.Add(ShipClassType.Submarine);
+
+            // rounding can leave us a hull short or long
+            while (l.Count > count) l.RemoveAt(l.Count - 1);
+            while (l.Count < count) l.Add(ShipClassType.Destroyer);
+            return l;
+        }
+
+        /// <summary>The player's fleet, honouring the chosen composition mode.</summary>
+        public List<ShipClassType> BuildPlayerFleet()
+        {
+            if (compositionMode != FleetCompositionMode.Custom) return BalancedFor(playerShipCount);
+
             var l = new List<ShipClassType>();
             for (int i = 0; i < battleships; i++) l.Add(ShipClassType.Battleship);
+            for (int i = 0; i < carriers; i++) l.Add(ShipClassType.Carrier);
             for (int i = 0; i < cruisers; i++) l.Add(ShipClassType.Cruiser);
             for (int i = 0; i < destroyers; i++) l.Add(ShipClassType.Destroyer);
             for (int i = 0; i < submarines; i++) l.Add(ShipClassType.Submarine);
             return l;
+        }
+
+        /// <summary>The enemy fleet: balanced for its own size, or an exact mirror of the player's.</summary>
+        public List<ShipClassType> BuildEnemyFleet()
+        {
+            if (compositionMode == FleetCompositionMode.Mirror)
+            {
+                var mirrored = new List<ShipClassType>(BuildPlayerFleet());
+                while (mirrored.Count > enemyShipCount) mirrored.RemoveAt(mirrored.Count - 1);
+                while (mirrored.Count < enemyShipCount) mirrored.Add(ShipClassType.Destroyer);
+                return mirrored;
+            }
+            return BalancedFor(enemyShipCount);
         }
 
         public FleetSetup Clone() => (FleetSetup)MemberwiseClone();
@@ -77,6 +137,8 @@ namespace Naval
         public float GameSpeed { get; private set; } = 1f;
         public FormationType DeployFormation { get; private set; } = FormationType.Wedge;
         public FleetSetup Setup { get; private set; } = FleetSetup.Default();
+        /// <summary>Battlefield chosen on the setup screen.</summary>
+        public MapConfig Map { get; private set; } = MapConfig.ForPreset(MapPreset.OceanArchipelago);
 
         public int PlayerStartCount { get; private set; }
         public int EnemyStartCount { get; private set; }
@@ -140,11 +202,15 @@ namespace Naval
             ApplyTimeScale();
         }
 
-        public void StartFromMenu(FleetSetup setup, int seed = 0)
+        public void StartFromMenu(FleetSetup setup, int seed = 0, MapConfig map = null)
         {
             Setup = setup != null ? setup.Clone() : FleetSetup.Default();
-            // the bootstrap already generated a map we can fight on; only rebuild on later matches
-            bool rebuild = !_worldFresh;
+            if (map != null) Map = map.Clone();
+
+            // The bootstrap pre-generates a map so the menu has something behind it, but that world
+            // was built with default settings - the moment the player picks a battlefield we have to
+            // build the one they actually asked for.
+            bool rebuild = !_worldFresh || map != null;
             _worldFresh = false;
             BeginMatch(Mode, seed == 0 ? Random.Range(1, 999999) : seed, rebuild);
         }
@@ -164,11 +230,19 @@ namespace Naval
 
             ClearBattlefield();
 
+            // deployment areas have to be sized before the map is generated: island placement
+            // keeps clear of them, and the fleets have to fit without colliding on the start line
+            int largestFleet = Mathf.Max(Setup.playerShipCount, Setup.enemyShipCount);
+            if (Setup.compositionMode == FleetCompositionMode.Custom)
+                largestFleet = Mathf.Max(largestFleet, Setup.CustomTotal);
+            WorldMap.I.ConfigureDeployment(largestFleet);
+
             if (regenerateWorld)
             {
-                WorldMap.I.Generate(seed, mode);
+                WorldMap.I.Generate(seed, mode, 512, Map);
                 NavGrid.I.Build(WorldMap.I);
             }
+            if (WeatherSystem.I != null) WeatherSystem.I.ForceWeather(Map.weather);
             if (Minimap.I != null) Minimap.I.BakeTerrain();
             if (FogOfWarRenderer.I != null) FogOfWarRenderer.I.Enabled = !DebugOverlay.ShowAll;
 
@@ -195,7 +269,11 @@ namespace Naval
             switch (mode)
             {
                 case GameMode.Domination:
-                    ObjectiveText = "Hold zones A, B and C. First to " + (int)ScoreToWin + " points, or sink the enemy fleet.";
+                    ObjectiveText = Map.flagLayout == FlagLayout.KingOfTheHill
+                        ? "Hold the central objective. First to " + (int)ScoreToWin + " points, or sink the enemy fleet."
+                        : Map.flagLayout == FlagLayout.TwoFlagAssault
+                          ? "Take and hold the forward flags. First to " + (int)ScoreToWin + " points, or sink the enemy fleet."
+                          : "Hold zones A, B and C. First to " + (int)ScoreToWin + " points, or sink the enemy fleet.";
                     TimeLimit = 900f;
                     break;
                 case GameMode.Skirmish:
@@ -235,6 +313,7 @@ namespace Naval
 
             if (SelectionManager.I != null) SelectionManager.I.Clear();
             if (ProjectileSystem.I != null) ProjectileSystem.I.ClearAll();
+            if (AirWingSystem.I != null) AirWingSystem.I.ClearAll();
             if (SmokeSystem.I != null) SmokeSystem.I.Clear();
             if (DetectionSystem.I != null) DetectionSystem.I.Clear();
             if (ParticleFX.I != null) ParticleFX.I.ClearAll();
@@ -270,42 +349,25 @@ namespace Naval
 
         List<ShipClassType> CompositionFor(GameMode mode, bool player)
         {
-            // Domination and Skirmish use the player's chosen 18-ship fleet, mirrored for the enemy
-            if (mode == GameMode.Domination || mode == GameMode.Skirmish || mode == GameMode.FleetBattle)
+            // Escort is the one mode with a fixed shape: the player has a convoy to protect.
+            if (mode == GameMode.Escort)
             {
-                var list = Setup.BuildOrder();
-                // both sides always field exactly the same number of hulls
-                while (list.Count > FleetSize) list.RemoveAt(list.Count - 1);
-                while (list.Count < FleetSize) list.Add(ShipClassType.Destroyer);
-                return list;
+                var l = new List<ShipClassType>();
+                if (player)
+                {
+                    int transports = Mathf.Clamp(Setup.playerShipCount / 5, 1, 4);
+                    for (int i = 0; i < transports; i++) l.Add(ShipClassType.Transport);
+                    var escorts = FleetSetup.BalancedFor(Mathf.Max(1, Setup.playerShipCount - transports));
+                    // convoy escorts are light ships, not a battle line
+                    for (int i = 0; i < escorts.Count; i++)
+                        l.Add(escorts[i] == ShipClassType.Battleship || escorts[i] == ShipClassType.Carrier
+                              ? ShipClassType.Cruiser : escorts[i]);
+                }
+                else l.AddRange(FleetSetup.BalancedFor(Setup.enemyShipCount));
+                return l;
             }
 
-            var l = new List<ShipClassType>();
-            switch (mode)
-            {
-                case GameMode.CaptureAndControl:
-                    for (int i = 0; i < 3; i++) l.Add(ShipClassType.Battleship);
-                    for (int i = 0; i < 6; i++) l.Add(ShipClassType.Cruiser);
-                    for (int i = 0; i < 7; i++) l.Add(ShipClassType.Destroyer);
-                    for (int i = 0; i < 2; i++) l.Add(ShipClassType.Submarine);
-                    break;
-                default:  // Escort
-                    if (player)
-                    {
-                        for (int i = 0; i < 3; i++) l.Add(ShipClassType.Transport);
-                        for (int i = 0; i < 5; i++) l.Add(ShipClassType.Cruiser);
-                        for (int i = 0; i < 10; i++) l.Add(ShipClassType.Destroyer);
-                    }
-                    else
-                    {
-                        for (int i = 0; i < 3; i++) l.Add(ShipClassType.Battleship);
-                        for (int i = 0; i < 5; i++) l.Add(ShipClassType.Cruiser);
-                        for (int i = 0; i < 7; i++) l.Add(ShipClassType.Destroyer);
-                        for (int i = 0; i < 3; i++) l.Add(ShipClassType.Submarine);
-                    }
-                    break;
-            }
-            return l;
+            return player ? Setup.BuildPlayerFleet() : Setup.BuildEnemyFleet();
         }
 
         /// <summary>
@@ -331,8 +393,12 @@ namespace Naval
                 Vector2 facing = (Vector2.zero - center);
                 float heading = facing.sqrMagnitude > 1f ? NavalMath.VectorToHeading(facing) : 0f;
 
-                // a squadron of six sits in a compact block behind its screen
-                var offsets = FormationManager.Offsets(FormationType.Wedge, groups[g].Count, 68f);
+                // Small squadrons form a wedge; large ones pack into a block so a 10 ship group
+                // still fits inside its deployment circle.
+                int n = groups[g].Count;
+                var shape = n > 6 ? FormationType.None : FormationType.Wedge;
+                float spacing = Mathf.Clamp(map.DeployRadius * 1.5f / Mathf.Max(2f, Mathf.Sqrt(n) * 1.35f), 46f, 80f);
+                var offsets = FormationManager.Offsets(shape, n, spacing);
 
                 for (int i = 0; i < groups[g].Count; i++)
                 {

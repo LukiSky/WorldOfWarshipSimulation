@@ -31,6 +31,7 @@ namespace Naval
         readonly List<float> _need = new List<float>();
         readonly List<int> _assignedCount = new List<int>();
         readonly HashSet<Ship> _fireAssigned = new HashSet<Ship>();
+        readonly HashSet<Ship> _decapping = new HashSet<Ship>();
 
         public static FleetCommander Create(Transform parent, Team team, GameMode mode, bool strategic = true)
         {
@@ -144,10 +145,42 @@ namespace Naval
             _ordered.AddRange(_mine);
             _ordered.Sort((a, b) => ScreenPriority(a.Stats.classType).CompareTo(ScreenPriority(b.Stats.classType)));
 
+            // Emergency first: a point actively being taken off us outranks everything else on the
+            // board (utility 95 vs 90 for grabbing an empty one), so the nearest hulls peel off to
+            // break the capture before the draft hands anyone a station.
+            _decapping.Clear();
+            if (Assessment.TryFindZoneBeingTaken(out ZoneIntel threatened) && threatened.zone != null)
+            {
+                int want = Mathf.Clamp(threatened.knownEnemyShips + 1, 1, 3);
+                for (int pick = 0; pick < want; pick++)
+                {
+                    Ship best = null;
+                    float bd = float.MaxValue;
+                    for (int i = 0; i < _ordered.Count; i++)
+                    {
+                        var s = _ordered[i];
+                        if (s.AI == null || _decapping.Contains(s)) continue;
+                        if (s.Submarine != null) continue;              // a submerged boat cannot contest
+                        float d = Vector2.Distance(s.Position, threatened.Position);
+                        // fast hulls get there in time; battleships rarely do
+                        d *= s.Stats.classType == ShipClassType.Battleship ? 1.8f : 1f;
+                        if (d < bd) { bd = d; best = s; }
+                    }
+                    if (best == null) break;
+                    _decapping.Add(best);
+                    best.AI.Assignment = AIAssignment.Decap;
+                    best.AI.AssignedZone = threatened.zone;
+                    best.AI.Aggression = Mathf.Max(1.2f, AggressionFor(Assessment.Posture));
+                    Commit(best, threatened.Position);
+                }
+                if (_decapping.Count > 0)
+                    Assessment.PostureReason = "resetting " + threatened.zone.zoneName;
+            }
+
             for (int i = 0; i < _ordered.Count; i++)
             {
                 var s = _ordered[i];
-                if (s.AI == null) continue;
+                if (s.AI == null || _decapping.Contains(s)) continue;
 
                 int pick = -1;
                 float bestNeed = float.MinValue;

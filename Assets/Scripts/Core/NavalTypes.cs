@@ -2,7 +2,7 @@ using UnityEngine;
 
 namespace Naval
 {
-    public enum ShipClassType { Destroyer, Cruiser, Battleship, Submarine, Transport }
+    public enum ShipClassType { Destroyer, Cruiser, Battleship, Submarine, Transport, Carrier }
 
     public enum Team { Player = 0, Enemy = 1, Neutral = 2 }
 
@@ -14,7 +14,7 @@ namespace Naval
 
     public enum OrderType { None, Move, AttackMove, Attack, Patrol, Follow, Stop, Reverse, Retreat, HoldPosition, ReturnToPort }
 
-    public enum FormationType { None, LineAhead, LineAbreast, Wedge, Circle, DefensiveScreen }
+    public enum FormationType { None, LineAhead, LineAbreast, Wedge, Circle, DefensiveScreen, ScreenedCarrierCore, DoubleColumn }
 
     public enum WeatherType { Clear, Fog, Rain, Storm }
 
@@ -30,13 +30,18 @@ namespace Naval
     {
         public static Team Opponent(Team t) => t == Team.Player ? Team.Enemy : Team.Player;
 
+        // High contrast identification palette: cyan friendly, crimson hostile, amber neutral.
+        public static readonly Color Friendly = new Color(0f, 0.898f, 1f);        // #00E5FF
+        public static readonly Color Hostile = new Color(1f, 0.090f, 0.267f);     // #FF1744
+        public static readonly Color Neutral = new Color(1f, 0.769f, 0f);         // #FFC400
+
         public static Color Color(Team t)
         {
             switch (t)
             {
-                case Team.Player: return new Color(0.35f, 0.78f, 1f);
-                case Team.Enemy: return new Color(1f, 0.36f, 0.34f);
-                default: return new Color(0.85f, 0.85f, 0.6f);
+                case Team.Player: return Friendly;
+                case Team.Enemy: return Hostile;
+                default: return Neutral;
             }
         }
     }
