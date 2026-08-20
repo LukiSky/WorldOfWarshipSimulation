@@ -217,7 +217,9 @@ namespace Naval
 
             Vector2 station;
 
-            if (indexInZone < 2 && s.Submarine == null)
+            bool secured = z.zone.FullyCaptured && z.zone.Owner == team && !z.zone.UnderAttack;
+
+            if (indexInZone < 2 && s.Submarine == null && !secured)
             {
                 // Cap sitter: get in the circle and stay in it. The draft hands out the lightest
                 // hulls first, so these are destroyers when the fleet has any - but a fleet of
@@ -225,6 +227,14 @@ namespace Naval
                 ai.Assignment = z.isMine ? AIAssignment.HoldCap : AIAssignment.ContestCap;
                 float ang = indexInZone * 2.4f;
                 station = z.Position + new Vector2(Mathf.Cos(ang), Mathf.Sin(ang)) * z.zone.radius * 0.45f;
+            }
+            else if (secured && indexInZone < 2 && s.Submarine == null)
+            {
+                // Secured points do not need to be sat on, so the ships that took it push out in
+                // front of it instead and meet the counter-attack away from the circle.
+                ai.Assignment = AIAssignment.Screen;
+                station = z.Position + toEnemy * z.zone.radius * 1.8f
+                          + new Vector2(-toEnemy.y, toEnemy.x) * ((indexInZone % 2 == 0) ? 1f : -1f) * z.zone.radius * 0.7f;
             }
             else if (s.Submarine != null)
             {

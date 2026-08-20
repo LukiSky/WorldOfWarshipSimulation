@@ -1,9 +1,9 @@
-# Naval Warfare — 2D Fleet Combat (18v18, Unity 6)
+# Naval Warfare — 2D Fleet Combat (Unity 6)
 
-A top-down 2D naval combat game in the spirit of World of Warships: **18 allied ships against 18
-enemy ships**, a **hybrid control scheme** that lets you either con a single warship yourself or
-command the whole fleet as an RTS, a **domination** objective over three capture zones, and
-**time compression up to 8x**.
+A top-down 2D naval combat game in the spirit of World of Warships: fleets of **1 to 30 ships a
+side**, a **hybrid control scheme** that lets you either con a single warship yourself or command
+the whole fleet as an RTS, **three battlefields** with configurable objectives, four combat ship
+classes, and **time compression up to 8x**.
 
 Everything is generated at runtime — no art, audio or prefab assets. Ship sprites, turrets, the
 water/terrain shader, particle atlases and every sound effect are synthesised in code.
@@ -23,9 +23,9 @@ object that builds the entire game.
 
 **Flow:** fleet selection → deployment → battle → result.
 
-1. **Fleet selection.** Pick how your 18 hulls are split across battleships, cruisers, destroyers and
-   submarines, and whether you start as **fleet commander** (default) or as the **captain** of one
-   ship. The enemy fields the same 18.
+1. **Battle setup.** Slide each side's fleet size (1–30, default 6), choose how the enemy is built
+   (**Balanced** / **Custom slots** / **Mirror yours**), pick the battlefield, and choose whether you
+   start as **fleet commander** (default) or as the **captain** of one ship.
 2. **Deployment.** The sim is paused. The fleet deploys as **three squadrons — LEFT, CENTRE and
    RIGHT** — on your baseline, facing the enemy across the map, with caps A/B/C strung along the
    centre line between you. Drag ships to reposition them inside their squadron's area (drag one
@@ -79,6 +79,12 @@ zooms out far enough to see the whole map, `F` follows, `` ` `` frames the fleet
 | **Battleship** | Slow, sluggish, huge health and armour, devastating slow guns | HE shells | AP shells | Damage control | Repair party |
 | **Submarine** | Stealthy, fragile, dives to hide | Homing torpedoes | Sonar ping | Hydrophone | Dive/surface (`X`) |
 
+Every ship carries an **overhead class symbol** — DD two diamonds, CA diamond with a slash, BB
+diamond with two slashes, SS chevron — held at a constant screen size and coloured
+cyan for friendly, crimson for hostile, amber for neutral. It stays readable through smoke and
+weather and at any zoom, which is how you read a 30-ship battle at a glance. The hull also carries an
+elongated team aura tracing its waterline, so you can see which way a contact is pointing.
+
 **HE vs AP** matters: HE trades penetration and raw damage for a much higher fire chance and can
 never citadel; AP does full damage, can over-penetrate light hulls, and can land citadel hits on a
 broadside target. Angle your armour and shells will shatter or ricochet.
@@ -86,16 +92,30 @@ broadside target. Angle your armour and shells will shatter or ricochet.
 **Submarine ping → homing torpedoes:** a sonar ping marks a target for ~24 seconds. Torpedoes fired
 while the mark holds steer onto it; the marked ship also lights up on the plot until the lock decays.
 
-## Domination
+## Battlefields and objectives
 
-Three zones — **A** (left flank), **B** (centre) and **C** (right flank) — sit on the centre
-line between the two baselines, one roughly ahead of each of your squadrons. Each is a `CircleCollider2D`
-trigger: ships inside fill the capture meter (about 40 seconds solo, faster with more hulls, with
-diminishing returns). **If both fleets have ships inside, the meter freezes — contested.** A held
-zone pays 1.2 points/second, and each kill is worth 12.
+| Preset | Terrain | Default objective |
+|---|---|---|
+| **Ocean Archipelago** | Scattered islands giving cover and torpedo chokepoints | Three-point domination (A/B/C) |
+| **Open Sea** | No cover at all — pure gunnery and angling | King of the Hill (one large central point) |
+| **Strait Clash** | Two landmasses squeezing a narrow central channel | Two-flag assault (a flag in front of each base) |
 
-**Win by** reaching **1000 points**, sinking all 18 enemy ships, or leading on points when the
-**15:00** clock expires.
+Island density, weather and capture radius (500–2000 m) are all adjustable on the setup screen, and
+each preset sets its own spawn-to-cap distance so first contact happens early rather than after a
+five-minute sail.
+
+Zones are `CircleCollider2D` triggers: ships inside fill the meter (about 40 seconds solo, faster
+with more hulls, diminishing returns). **Both fleets inside freezes it — contested.**
+
+**Capture is permanent.** Once the meter completes, the zone is yours and keeps scoring whether or
+not anyone stays behind; partial progress the enemy made before breaking off decays away. The only
+way to lose a point is for the other side to sail in and complete a capture of their own. That means
+taking a cap frees your ships to move on instead of parking on it, and makes the objective a clean
+discrete state — `Neutral → Capturing → Captured`, plus `Contested` — rather than a value that
+quietly bleeds away.
+
+A held zone pays 1.2 points/second and each kill is worth 12. **Win by** reaching **1000 points**,
+sinking the enemy fleet, or leading on points when the **15:00** clock expires.
 
 ## Architecture
 
@@ -107,8 +127,9 @@ navigation, gunnery, visuals) runs in `Update`; forces run in `FixedUpdate`.
 ```
 Core/      NavalTypes, ShipStats, ShipDatabase, GameEvents, ShipRegistry,
            GameManager (fleet setup, domination, time compression), GameBootstrap
-World/     WorldMap (height field, islands, ports, zones), NavGrid (draft-aware A*),
-           OceanRenderer, FogOfWarRenderer, WeatherSystem, CaptureZone, NavalPort
+World/     WorldMap (height field, islands, ports, zones), MapConfig (presets/layouts),
+           NavGrid (draft-aware A*), OceanRenderer, FogOfWarRenderer, WeatherSystem,
+           CaptureZone, NavalPort
 Ships/     Ship, ShipMovement (Rigidbody2D), ShipNavigation, ShipDamage, ShipDetection,
            ShipWeapons, ShipAbilities, SubmarineSystem, ShipResources, ShipVisual
 Detection/ DetectionSystem (contact memory), SmokeScreen
@@ -222,8 +243,6 @@ about 17 units out, a battleship needs roughly 50.
 * **Health bars are batched line-drawing, not a world-space Canvas per ship.** Same result on screen
   — a bar above every spotted hull, at constant screen size — but 36 ships plus contacts would
   otherwise mean dozens of extra canvases rebuilding every frame.
-* **No aircraft.** AA ratings exist in the ship data and are shown in the stats, but there are no
-  carriers or planes in this build, so AA never fires.
 * **A\* grid pathfinding** rather than NavMesh: the water is a height field with per-draft
   passability, which a baked NavMesh cannot express (a destroyer and a battleship need different
   navigable areas over the same water).

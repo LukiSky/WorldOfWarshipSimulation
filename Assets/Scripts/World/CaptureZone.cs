@@ -3,10 +3,19 @@ using UnityEngine;
 
 namespace Naval
 {
+    /// <summary>Discrete objective state - deliberately unambiguous so it is easy to learn from.</summary>
+    public enum ZoneState { Neutral, Capturing, Captured, Contested }
+
     /// <summary>
     /// A domination objective. Occupancy is driven by a CircleCollider2D trigger; holding it alone
     /// fills the capture meter, both fleets present freezes it ("contested"), and a held zone
     /// pours points into its team's score.
+    ///
+    /// Capture is permanent: once the meter completes, the zone belongs to that team and keeps
+    /// scoring whether or not anyone stays behind. The only way to lose it is for the other side to
+    /// sail in and complete a capture of their own. That frees the fleet to move on after taking a
+    /// point instead of parking on it, and it makes the objective a clean discrete achievement
+    /// rather than a value that quietly bleeds away.
     /// </summary>
     [RequireComponent(typeof(CircleCollider2D))]
     public class CaptureZone : MonoBehaviour
@@ -102,19 +111,52 @@ namespace Naval
                 // an abandoned, uncaptured zone slowly bleeds back to neutral
                 Progress = Mathf.MoveTowards(Progress, 0f, dt / (BaseCaptureTime * 3f));
             }
+            else
+            {
+                // Nobody is here and the zone is already owned: any partial progress the other side
+                // managed before breaking off is undone, and the zone stays with its owner. Holding
+                // ground does not require a hull sitting on it.
+                float home = Owner == Team.Player ? 1f : -1f;
+                Progress = Mathf.MoveTowards(Progress, home, dt / (BaseCaptureTime * 0.8f));
+            }
 
+            // Ownership only ever transfers on a completed capture - it is never given up passively.
             Team newOwner = Owner;
             if (Progress >= 1f) newOwner = Team.Player;
             else if (Progress <= -1f) newOwner = Team.Enemy;
-            else if (Mathf.Abs(Progress) < 0.35f) newOwner = Team.Neutral;
 
             if (newOwner != Owner)
             {
                 Owner = newOwner;
-                string who = Owner == Team.Player ? "captured by our forces"
-                           : Owner == Team.Enemy ? "lost to the enemy" : "is neutral again";
-                GameEvents.RaiseMessage("Zone " + zoneName + " " + who, Owner);
+                GameEvents.RaiseMessage("Zone " + zoneName + (Owner == Team.Player ? " captured by our forces" : " lost to the enemy"), Owner);
                 AudioManager.PlayUI(Owner == Team.Player ? SoundId.Detected : SoundId.Alarm, 0.6f);
+            }
+        }
+
+        /// <summary>True once the meter has completed for the owner - the zone is locked in.</summary>
+        public bool FullyCaptured => Owner != Team.Neutral &&
+            (Owner == Team.Player ? Progress >= 1f : Progress <= -1f);
+
+        /// <summary>Is someone actively taking this zone off its owner right now?</summary>
+        public bool UnderAttack
+        {
+            get
+            {
+                if (Owner == Team.Player) return EnemyShips > 0;
+                if (Owner == Team.Enemy) return PlayerShips > 0;
+                return PlayerShips > 0 || EnemyShips > 0;
+            }
+        }
+
+        /// <summary>Coarse discrete state, for the HUD and for anything learning from the game.</summary>
+        public ZoneState State
+        {
+            get
+            {
+                if (Contested) return ZoneState.Contested;
+                if (FullyCaptured) return ZoneState.Captured;
+                if (Mathf.Abs(Progress) > 0.01f) return ZoneState.Capturing;
+                return ZoneState.Neutral;
             }
         }
 

@@ -650,12 +650,11 @@ namespace Naval
             }
 
             // ---- per class allocation (custom mode) ---------------------------
-            var classes = new[] { ShipClassType.Battleship, ShipClassType.Carrier, ShipClassType.Cruiser,
+            var classes = new[] { ShipClassType.Battleship, ShipClassType.Cruiser,
                                   ShipClassType.Destroyer, ShipClassType.Submarine };
             var blurbs = new[]
             {
                 "Slow and sluggish, huge health and armour, devastating slow guns.",
-                "Fights through its air wing: strikes far beyond gun range, weak up close.",
                 "Balanced, strong utility: hydroacoustic search and surveillance radar.",
                 "Fastest and most agile, fragile, quick guns, torpedoes and smoke.",
                 "Stealthy and fragile. Dives to hide, hunts with homing torpedoes."
@@ -1324,7 +1323,7 @@ namespace Naval
         void RefreshMenu()
         {
             bool custom = _menuSetup.compositionMode == FleetCompositionMode.Custom;
-            var classes = new[] { ShipClassType.Battleship, ShipClassType.Carrier, ShipClassType.Cruiser,
+            var classes = new[] { ShipClassType.Battleship, ShipClassType.Cruiser,
                                   ShipClassType.Destroyer, ShipClassType.Submarine };
 
             // in the automatic modes the per-class rows show what the generator will actually build

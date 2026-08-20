@@ -195,13 +195,6 @@ namespace Naval
                     EraseSlash(tex, new Vector2(0.10f, 0.50f), new Vector2(0.90f, 0.90f), 0.055f);
                     break;
 
-                case ShipClassType.Carrier:
-                    // flight deck with a runway arrow pointing along the launch axis
-                    FillRect(tex, 0.22f, 0.28f, 0.78f, 0.72f, Color.white);
-                    ErasePolygon(tex, new[]{ new Vector2(0.42f,0.63f), new Vector2(0.66f,0.50f), new Vector2(0.42f,0.37f) });
-                    EraseRect(tex, 0.28f, 0.472f, 0.46f, 0.528f);
-                    break;
-
                 case ShipClassType.Submarine:
                     // downward inverted chevron
                     FillPolygon(tex, new[]{
@@ -307,13 +300,6 @@ namespace Naval
                         new Vector2(0.72f,0.20f), new Vector2(0.62f,0.02f), new Vector2(0.38f,0.02f),
                         new Vector2(0.28f,0.20f), new Vector2(0.28f,0.55f), new Vector2(0.34f,0.86f) };
                     break;
-                case ShipClassType.Carrier:
-                    // a flight deck: near rectangular, wider than the hull beneath it
-                    outline = new[]{
-                        new Vector2(0.50f,1.00f), new Vector2(0.76f,0.92f), new Vector2(0.88f,0.72f),
-                        new Vector2(0.88f,0.16f), new Vector2(0.74f,0.01f), new Vector2(0.26f,0.01f),
-                        new Vector2(0.12f,0.16f), new Vector2(0.12f,0.72f), new Vector2(0.24f,0.92f) };
-                    break;
                 default:
                     outline = new[]{
                         new Vector2(0.50f,0.99f), new Vector2(0.72f,0.84f), new Vector2(0.80f,0.60f),
@@ -351,15 +337,6 @@ namespace Naval
                     FillRect(tex, 0.40f, 0.44f, 0.60f, 0.66f, super);           // conning tower
                     FillRect(tex, 0.46f, 0.62f, 0.54f, 0.76f, dark);            // periscope mast
                     FillRect(tex, 0.30f, 0.30f, 0.70f, 0.34f, dark);            // dive planes
-                    break;
-                case ShipClassType.Carrier:
-                    // angled flight deck with centreline markings and an island to starboard
-                    FillRect(tex, 0.20f, 0.06f, 0.72f, 0.94f, Color.Lerp(deck, Color.black, 0.18f));
-                    FillRect(tex, 0.44f, 0.12f, 0.50f, 0.88f, Color.Lerp(deck, Color.white, 0.35f));
-                    for (int i = 0; i < 6; i++)                                   // deck stripes
-                        FillRect(tex, 0.30f, 0.16f + i * 0.13f, 0.40f, 0.19f + i * 0.13f, Color.Lerp(deck, Color.white, 0.2f));
-                    FillRect(tex, 0.74f, 0.38f, 0.86f, 0.62f, super);            // island superstructure
-                    FillRect(tex, 0.77f, 0.60f, 0.83f, 0.72f, dark);             // funnel and mast
                     break;
                 default:
                     FillRect(tex, 0.34f, 0.60f, 0.66f, 0.74f, super);

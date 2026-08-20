@@ -22,14 +22,13 @@ namespace Naval
         public int battleships = 1;
         public int cruisers = 2;
         public int destroyers = 2;
-        public int carriers = 0;
         public int submarines = 1;
 
         public ShipClassType controlClass = ShipClassType.Cruiser;
         /// <summary>Start conning a ship, or start as fleet commander (the default).</summary>
         public bool startAsCaptain = false;
 
-        public int CustomTotal => battleships + cruisers + destroyers + carriers + submarines;
+        public int CustomTotal => battleships + cruisers + destroyers + submarines;
 
         public int CountOf(ShipClassType c)
         {
@@ -38,7 +37,6 @@ namespace Naval
                 case ShipClassType.Battleship: return battleships;
                 case ShipClassType.Cruiser: return cruisers;
                 case ShipClassType.Destroyer: return destroyers;
-                case ShipClassType.Carrier: return carriers;
                 case ShipClassType.Submarine: return submarines;
                 default: return 0;
             }
@@ -51,29 +49,26 @@ namespace Naval
                 case ShipClassType.Battleship: battleships = Mathf.Max(0, battleships + delta); break;
                 case ShipClassType.Cruiser: cruisers = Mathf.Max(0, cruisers + delta); break;
                 case ShipClassType.Destroyer: destroyers = Mathf.Max(0, destroyers + delta); break;
-                case ShipClassType.Carrier: carriers = Mathf.Max(0, carriers + delta); break;
                 case ShipClassType.Submarine: submarines = Mathf.Max(0, submarines + delta); break;
             }
         }
 
         /// <summary>
         /// A sensible mix for an arbitrary fleet size: mostly destroyers and cruisers, a couple of
-        /// battleships, and a carrier only once the fleet is big enough to screen it.
+        /// battleships, and submarines once the fleet is big enough to spare the hulls.
         /// </summary>
         public static List<ShipClassType> BalancedFor(int count)
         {
             var l = new List<ShipClassType>();
             if (count <= 0) return l;
 
-            int carriers = count >= 10 ? 1 : 0;
             int battleships = Mathf.Clamp(Mathf.RoundToInt(count * 0.22f), count >= 3 ? 1 : 0, count);
             int subs = count >= 6 ? Mathf.Clamp(Mathf.RoundToInt(count * 0.12f), 1, 4) : 0;
-            int remaining = Mathf.Max(0, count - carriers - battleships - subs);
+            int remaining = Mathf.Max(0, count - battleships - subs);
             int cruisers = Mathf.RoundToInt(remaining * 0.5f);
             int destroyers = remaining - cruisers;
 
             for (int i = 0; i < battleships; i++) l.Add(ShipClassType.Battleship);
-            for (int i = 0; i < carriers; i++) l.Add(ShipClassType.Carrier);
             for (int i = 0; i < cruisers; i++) l.Add(ShipClassType.Cruiser);
             for (int i = 0; i < destroyers; i++) l.Add(ShipClassType.Destroyer);
             for (int i = 0; i < subs; i++) l.Add(ShipClassType.Submarine);
@@ -91,7 +86,6 @@ namespace Naval
 
             var l = new List<ShipClassType>();
             for (int i = 0; i < battleships; i++) l.Add(ShipClassType.Battleship);
-            for (int i = 0; i < carriers; i++) l.Add(ShipClassType.Carrier);
             for (int i = 0; i < cruisers; i++) l.Add(ShipClassType.Cruiser);
             for (int i = 0; i < destroyers; i++) l.Add(ShipClassType.Destroyer);
             for (int i = 0; i < submarines; i++) l.Add(ShipClassType.Submarine);
@@ -124,10 +118,24 @@ namespace Naval
     {
         public static GameManager I { get; private set; }
 
-        public const int FleetSize = 18;
         public const float ScoreToWin = 1000f;
-        public const float ZonePointsPerSecond = 1.2f;
         public const float KillPoints = 12f;
+
+        /// <summary>
+        /// Points per second for holding a single zone. Scaled by the zone count so that holding the
+        /// whole map wins in about the same time on every layout - otherwise a one-flag King of the
+        /// Hill map cannot reach 1000 points inside the time limit and every match ends on the clock.
+        /// </summary>
+        public const float FullMapPointsPerSecond = 3.6f;
+
+        public static float ZonePointsPerSecond
+        {
+            get
+            {
+                int zones = WorldMap.I != null && WorldMap.I.Zones != null ? WorldMap.I.Zones.Count : 3;
+                return FullMapPointsPerSecond / Mathf.Max(1, zones);
+            }
+        }
 
         public GameMode Mode { get; private set; } = GameMode.Domination;
         public GamePhase Phase { get; private set; } = GamePhase.Menu;
@@ -313,7 +321,6 @@ namespace Naval
 
             if (SelectionManager.I != null) SelectionManager.I.Clear();
             if (ProjectileSystem.I != null) ProjectileSystem.I.ClearAll();
-            if (AirWingSystem.I != null) AirWingSystem.I.ClearAll();
             if (SmokeSystem.I != null) SmokeSystem.I.Clear();
             if (DetectionSystem.I != null) DetectionSystem.I.Clear();
             if (ParticleFX.I != null) ParticleFX.I.ClearAll();
@@ -360,8 +367,7 @@ namespace Naval
                     var escorts = FleetSetup.BalancedFor(Mathf.Max(1, Setup.playerShipCount - transports));
                     // convoy escorts are light ships, not a battle line
                     for (int i = 0; i < escorts.Count; i++)
-                        l.Add(escorts[i] == ShipClassType.Battleship || escorts[i] == ShipClassType.Carrier
-                              ? ShipClassType.Cruiser : escorts[i]);
+                        l.Add(escorts[i] == ShipClassType.Battleship ? ShipClassType.Cruiser : escorts[i]);
                 }
                 else l.AddRange(FleetSetup.BalancedFor(Setup.enemyShipCount));
                 return l;

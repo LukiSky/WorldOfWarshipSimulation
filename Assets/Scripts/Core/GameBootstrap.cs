@@ -57,7 +57,6 @@ namespace Naval
             // ---- simulation --------------------------------------------------
             DetectionSystem.Create(_root);
             ProjectileSystem.Create(_root);
-            AirWingSystem.Create(_root);
 
             // ---- player ------------------------------------------------------
             var cam = RTSCamera.Create(_root, map.PlayerDeployCenter);

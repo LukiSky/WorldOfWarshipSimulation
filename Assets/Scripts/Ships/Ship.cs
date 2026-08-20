@@ -29,7 +29,6 @@ namespace Naval
         [System.NonSerialized] public ShipWeapons Weapons;
         [System.NonSerialized] public ShipAbilities Abilities;
         [System.NonSerialized] public SubmarineSystem Submarine;      // null for surface ships
-        [System.NonSerialized] public CarrierSystem Carrier;          // null unless it has a flight deck
         [System.NonSerialized] public ShipResources Resources;
         [System.NonSerialized] public ShipVisual Visual;
         [System.NonSerialized] public ShipAI AI;
@@ -110,7 +109,6 @@ namespace Naval
             s.Weapons = new ShipWeapons(s);
             s.Resources = new ShipResources(s);
             if (stats.IsSubmarine) s.Submarine = new SubmarineSystem(s);
-            if (stats.airWing != null) s.Carrier = new CarrierSystem(s);
             s.Abilities = new ShipAbilities(s);
             s.Visual = new ShipVisual(s);
             s.AI = new ShipAI(s);
@@ -160,7 +158,6 @@ namespace Naval
             Abilities.Tick(dt);
             Resources.Tick(dt);
             Submarine?.Tick(dt);
-            Carrier?.Tick(dt);
             Damage.Tick(dt);
 
             if (!Damage.IsSinking)

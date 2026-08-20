@@ -124,7 +124,8 @@ namespace Naval
 
                     // a cap sitter is tied to its ring
                     if (s.AI.AssignedZone != null &&
-                        (s.AI.Assignment == AIAssignment.HoldCap || s.AI.Assignment == AIAssignment.ContestCap))
+                        (s.AI.Assignment == AIAssignment.HoldCap || s.AI.Assignment == AIAssignment.ContestCap ||
+                         s.AI.Assignment == AIAssignment.Decap))
                         LineDrawer.Dashed(s.Position, s.AI.AssignedZone.Position, 1.1f * ps,
                             new Color(aCol.r, aCol.g, aCol.b, 0.4f), 16f, 12f);
                 }

@@ -54,6 +54,17 @@ namespace Naval
                     }
                     break;
 
+                case FormationType.DoubleColumn:
+                    // two parallel columns - the classic approach formation: concentrated broadsides
+                    // on both beams while staying narrow enough to thread between islands
+                    for (int i = 0; i < count; i++)
+                    {
+                        int side = (i % 2 == 0) ? 1 : -1;
+                        int rank = i / 2;
+                        result[i] = new Vector2(side * spacing * 0.6f, -spacing * rank);
+                    }
+                    break;
+
                 default:
                     for (int i = 0; i < count; i++)
                     {
@@ -118,7 +129,6 @@ namespace Naval
                 case FormationType.Circle: return "Circle";
                 case FormationType.DefensiveScreen: return "Defensive Screen";
                 case FormationType.DoubleColumn: return "Double Column";
-                case FormationType.ScreenedCarrierCore: return "Screened Carrier Core";
                 default: return "None";
             }
         }

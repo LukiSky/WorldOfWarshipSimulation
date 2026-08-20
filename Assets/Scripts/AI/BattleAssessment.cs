@@ -299,6 +299,10 @@ namespace Naval
             if (z.contested) v += 26f;                 // a contest is decided in the next few seconds
             if (z.isMine && z.knownEnemyShips > 0) v += 30f;   // being taken off us right now
 
+            // A point that is locked in and unthreatened needs nothing from us. Capture is permanent,
+            // so hulls parked on it are hulls doing nothing - push them at the next objective.
+            if (z.zone != null && z.zone.FullyCaptured && z.isMine && !z.zone.UnderAttack) v -= 55f;
+
             v -= Vector2.Distance(z.Position, FleetCenter) * 0.022f;
 
             // do not send the fleet somewhere we already know is stacked against us

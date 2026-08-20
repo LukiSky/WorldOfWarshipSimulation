@@ -2,7 +2,7 @@ using UnityEngine;
 
 namespace Naval
 {
-    public enum ShipClassType { Destroyer, Cruiser, Battleship, Submarine, Transport, Carrier }
+    public enum ShipClassType { Destroyer, Cruiser, Battleship, Submarine, Transport }
 
     public enum Team { Player = 0, Enemy = 1, Neutral = 2 }
 
@@ -14,7 +14,7 @@ namespace Naval
 
     public enum OrderType { None, Move, AttackMove, Attack, Patrol, Follow, Stop, Reverse, Retreat, HoldPosition, ReturnToPort }
 
-    public enum FormationType { None, LineAhead, LineAbreast, Wedge, Circle, DefensiveScreen, ScreenedCarrierCore, DoubleColumn }
+    public enum FormationType { None, LineAhead, LineAbreast, Wedge, Circle, DefensiveScreen, DoubleColumn }
 
     public enum WeatherType { Clear, Fog, Rain, Storm }
 
