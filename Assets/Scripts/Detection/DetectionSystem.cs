@@ -32,6 +32,13 @@ namespace Naval
         readonly List<Contact> _listCache = new List<Contact>();
 
         public const float MemoryDuration = 55f;
+
+        /// <summary>
+        /// Hard cutoff on the observer/target loop. It has to comfortably exceed the longest gun on
+        /// the map - a battleship that can shell a target it is structurally unable to see would
+        /// never fire at all.
+        /// </summary>
+        public const float MaxDetectionRange = 2800f;   // 28 km
         float _timer;
 
         public static DetectionSystem Create(Transform parent)
@@ -83,9 +90,21 @@ namespace Naval
                     if (obs == null || obs.IsDead) continue;
 
                     float dist = Vector2.Distance(obs.Position, target.Position);
-                    if (dist > 1200f) continue;
+                    if (dist > MaxDetectionRange) continue;
 
                     bool submerged = target.Submarine != null && target.Submarine.IsSubmerged;
+
+                    // Radar, hydroacoustic search and the submarine's own hydrophone acquire a
+                    // contact regardless of how good its concealment is. Radar reaches through
+                    // islands and smoke alike, which is what makes it the counter to a smoked-up
+                    // destroyer sitting on a cap.
+                    float assured = obs.Abilities != null ? obs.Abilities.AssuredDetectionRange : 0f;
+                    bool assuredHit = assured > 0f && dist <= assured;
+                    if (assuredHit && (!submerged || obs.Abilities.AssuredDetectionSubmerged))
+                    {
+                        if (submerged) sonar = true;
+                        else visual = true;
+                    }
 
                     if (submerged)
                     {
@@ -106,6 +125,10 @@ namespace Naval
                     }
                     else
                     {
+                        // a ship this close is acquired whatever its concealment
+                        if (dist <= target.Stats.assuredDetectionRange &&
+                            HasLineOfSight(obs.Position, target.Position, false)) visual = true;
+
                         float r = Mathf.Min(target.Detectability, obs.Detection.EffectiveSpotRange);
                         if (dist <= r && HasLineOfSight(obs.Position, target.Position, true)) visual = true;
                         // hydrophones and close range lookouts see through smoke

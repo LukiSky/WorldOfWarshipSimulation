@@ -922,6 +922,14 @@ namespace Naval
             Vector2 toMe = (_s.Position - target.Position).normalized;
             float dist = _s.DistanceTo(target);
 
+            // Guns now out-range eyes by a wide margin - a battleship can shell 26 km but only sees
+            // 14 km - so standing off at maximum gun range would mean never seeing anything to shoot
+            // at. Hold a range we can spot from ourselves, unless someone else is already holding
+            // the contact for us, in which case take the free reach.
+            float spotLimit = Mathf.Min(target.Detectability, _s.Detection.EffectiveSpotRange);
+            bool spottedByOthers = dist > spotLimit;
+            if (!spottedByOthers) desired = Mathf.Min(desired, spotLimit * 0.95f);
+
             Vector2 goal;
             if (dist < desired * 0.8f)          // too close, open the range
                 goal = target.Position + toMe * desired * 1.25f;

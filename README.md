@@ -50,7 +50,7 @@ select your left, centre and right groups.
 | Mouse | Trains the guns; the reticle auto-leads a target it is resting on |
 | Left click / hold | Fire the main battery |
 | Right click | Torpedo spread along the reticle bearing (arcs are drawn on screen) |
-| `1` – `4` | Class consumables (see below) |
+| `1` – `6` | Class consumables (see below) |
 | `X` | Submarine dive / surface |
 | `E` | Damage control party |
 
@@ -72,12 +72,19 @@ zooms out far enough to see the whole map, `F` follows, `` ` `` frames the fleet
 
 ## Ship classes and consumables
 
-| Class | Character | `1` | `2` | `3` | `4` |
-|---|---|---|---|---|---|
-| **Destroyer** | Fastest, most agile, fragile, quick guns | HE shells | Torpedoes | Smoke screen | Engine boost |
-| **Cruiser** | Balanced, strong utility | HE shells | AP shells | Hydroacoustic search | Surveillance radar |
-| **Battleship** | Slow, sluggish, huge health and armour, devastating slow guns | HE shells | AP shells | Damage control | Repair party |
-| **Submarine** | Stealthy, fragile, dives to hide | Homing torpedoes | Sonar ping | Hydrophone | Dive/surface (`X`) |
+Every hull is a real Tier 10 ship, and every number below comes from its actual statistics —
+see [SHIPS.md](SHIPS.md) for the full conversion.
+
+| Class | Ship | HP | Speed | Concealment | Gun range | Consumables |
+|---|---|---|---|---|---|---|
+| **DD** | Shimakaze | 17 900 | 39 kn | **5.6 km** | 11.4 km | HE `1`, torpedoes `2`, smoke `3`, engine boost `4`, damage control `5` |
+| **CA** | Des Moines | 50 600 | 33 kn | 10.9 km | 15.8 km | HE `1`, AP `2`, radar `3`, hydro `4`, repair `5`, damage control `6` |
+| **BB** | Yamato | 97 200 | 27 kn | 14.1 km | **26.6 km** | HE `1`, AP `2`, damage control `3`, repair `4`, spotter plane `5` |
+| **SS** | Balao | 20 200 | 30 kn | 5.9 km surfaced, 2.3 km at periscope | — | Homing torps `1`, ping `2`, hydrophone `3`, surveillance `4`, damage control `5`, dive `X` |
+
+Guns out-range eyes by a wide margin — a Yamato shoots 26.6 km but is only *seen* at 14.1 km — so
+**spotting decides the battle**. A destroyer that stays dark is what lets the battle line shoot at
+all, and radar is what takes that away from it.
 
 Every ship carries an **overhead class symbol** — DD two diamonds, CA diamond with a slash, BB
 diamond with two slashes, SS chevron — held at a constant screen size and coloured
@@ -87,10 +94,33 @@ elongated team aura tracing its waterline, so you can see which way a contact is
 
 **HE vs AP** matters: HE trades penetration and raw damage for a much higher fire chance and can
 never citadel; AP does full damage, can over-penetrate light hulls, and can land citadel hits on a
-broadside target. Angle your armour and shells will shatter or ricochet.
+broadside target.
 
-**Submarine ping → homing torpedoes:** a sonar ping marks a target for ~24 seconds. Torpedoes fired
+**Angling and overmatch.** A shell striking more than ~45° off the plate normal starts to bounce and
+always bounces past 60°, so turning your bow toward the enemy is how you survive. Two things defeat
+it. *Improved angles*: Des Moines super-heavy AP does not begin ricocheting until 60° and only
+always bounces at 75°. *Overmatch*: a shell defeats plating thinner than calibre/14.3 **regardless of
+angle** — Yamato's 460 mm rifles overmatch 32 mm, which is exactly a cruiser's bow, so angling does
+not save a cruiser from a Yamato even though it saves it from everything else.
+
+Measured over 400 shells per case:
+
+| Shot | Result |
+|---|---|
+| Yamato AP into an angled Des Moines bow | 100% penetration — overmatched |
+| Yamato AP into a broadside Des Moines | 34% citadel, 66% penetration |
+| Yamato AP into a Shimakaze | 100% overpenetration — nothing to arm the fuse |
+| Des Moines AP into an angled Yamato bow | 100% ricochet |
+| Des Moines AP into a broadside Yamato | 100% penetration, **never a citadel** (450 mm cannot beat a 410 mm belt) |
+| Des Moines AP into a broadside Des Moines | 37% citadel |
+
+**Submarine ping → homing torpedoes:** a sonar ping marks a target for ~25 seconds. Torpedoes fired
 while the mark holds steer onto it; the marked ship also lights up on the plot until the lock decays.
+
+**Radar and hydro defeat concealment outright.** Surveillance radar (10 km) spots everything inside
+its circle through smoke *and* through islands; hydroacoustic search (5 km) and the submarine's
+hydrophone (7 km) do the same but only through smoke, and both also hear submerged boats. This is the
+counter to a destroyer sitting invisible on a cap.
 
 ## Battlefields and objectives
 
@@ -114,8 +144,14 @@ taking a cap frees your ships to move on instead of parking on it, and makes the
 discrete state — `Neutral → Capturing → Captured`, plus `Contested` — rather than a value that
 quietly bleeds away.
 
-A held zone pays 1.2 points/second and each kill is worth 12. **Win by** reaching **1000 points**,
-sinking the enemy fleet, or leading on points when the **15:00** clock expires.
+Zone income is normalised by how many zones the map has — `3.6 / zoneCount` points per second each,
+so holding the whole map wins in the same ~278 seconds whether that map has one flag or five. Each
+kill is worth 12. **Win by** reaching **1000 points**, sinking the enemy fleet, or leading on points
+when the **20:00** clock expires. Domination runs 20 minutes because the ships move at real speeds —
+a Yamato makes 27 knots, and the nearest cap is 7.5 km from the start line.
+
+The battlefield itself — terrain generation, draft and grounding, deployment geometry, weather, fog
+of war and the full objective ruleset — is documented in **[ENVIRONMENT.md](ENVIRONMENT.md)**.
 
 ## Architecture
 

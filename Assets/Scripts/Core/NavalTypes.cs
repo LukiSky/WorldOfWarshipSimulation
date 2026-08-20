@@ -56,6 +56,16 @@ namespace Naval
 
         public const float ShallowDepth = 0.35f;       // normalized depth below which water is shallow
 
+        /// <summary>
+        /// Ordnance damages whatever it actually lands on, friend or enemy. Torpedoes crossing a
+        /// friendly wake and shells fired through a squadron mate are real hazards, so formation
+        /// keeping and torpedo lanes matter. Set false for the old team-immune behaviour.
+        /// </summary>
+        public const bool FriendlyFire = true;
+
+        /// <summary>How much of a hit lands when the victim is on the firing ship's own side.</summary>
+        public const float FriendlyFireScale = 1f;
+
         public static float Half => WorldSize * 0.5f;
 
         // Simulation rates (Hz) for time-sliced systems

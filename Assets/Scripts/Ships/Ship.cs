@@ -198,22 +198,31 @@ namespace Naval
             var other = collision.collider.GetComponentInParent<Ship>();
             if (other == null) return;
 
-            // ramming: damage scales with the closing speed and the other hull's mass
+            // Ramming: damage scales with the closing speed and the other hull's mass, and it does
+            // not care whose side the other ship is on - shouldering a squadron mate out of the way
+            // costs both of you plating. The threshold is low because ships now run at real speeds:
+            // a destroyer's whole speed range is 0 to 2 units/second, so 1.2 would have meant only
+            // head-on collisions ever registered.
             float closing = collision.relativeVelocity.magnitude;
-            if (closing < 1.2f) return;
+            if (closing < 0.35f) return;
 
             float massRatio = other.Body != null && Body != null
                 ? Mathf.Clamp(other.Body.mass / Mathf.Max(1f, Body.mass), 0.3f, 3f) : 1f;
             float dmg = Stats.maxHealth * 0.010f * closing * massRatio;
 
             Damage.ApplyDamage(dmg, other, DamageSource.Collision, Position);
-            if (closing > 4f && Random.value < 0.4f) Damage.StartFlooding();
+            // a hard ram opens plates below the waterline
+            if (closing > 1.6f && Random.value < 0.4f) Damage.StartFlooding();
 
             ParticleFX.Splash(collision.GetContact(0).point, 2.5f);
             AudioManager.PlayAt(SoundId.Impact, Position, 0.7f);
 
-            if (team == Team.Player && closing > 3f)
-                GameEvents.RaiseMessage(shipName + " collided with " + other.shipName, Team.Player);
+            if (team == Team.Player && closing > 0.8f)
+                GameEvents.RaiseMessage(
+                    other.team == team
+                        ? shipName + " fouled " + other.shipName + " - both hulls damaged"
+                        : shipName + " rammed " + other.shipName,
+                    Team.Player);
         }
 
         // ------------------------------------------------------------------ death

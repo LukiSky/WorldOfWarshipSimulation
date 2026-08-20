@@ -23,9 +23,11 @@ namespace Naval
 
         /// <summary>
         /// How far each fleet starts from the centre line, as a fraction of the map half width.
-        /// Tuned per preset so first contact lands around two minutes in rather than five.
+        /// Ships run at real speeds - a Yamato makes 27 knots, or 1.39 units/second - so these are
+        /// set so the two lines start just outside mutual battleship spotting range (14.1 km) and
+        /// a destroyer reaches the nearest cap in about five minutes.
         /// </summary>
-        public float spawnDistance = 0.62f;
+        public float spawnDistance = 0.375f;
 
         public const float MinCaptureRadius = 50f;
         public const float MaxCaptureRadius = 200f;
@@ -39,7 +41,7 @@ namespace Naval
                     // no cover at all, so the fleets start closer or the approach is a long empty sail
                     c.islandDensity = IslandDensity.Low;
                     c.flagLayout = FlagLayout.KingOfTheHill;
-                    c.spawnDistance = 0.54f;
+                    c.spawnDistance = 0.36f;
                     c.captureRadius = 190f;
                     break;
 
@@ -47,14 +49,14 @@ namespace Naval
                     // two landmasses squeeze everything through the middle
                     c.islandDensity = IslandDensity.High;
                     c.flagLayout = FlagLayout.TwoFlagAssault;
-                    c.spawnDistance = 0.68f;
+                    c.spawnDistance = 0.55f;
                     c.captureRadius = 130f;
                     break;
 
                 default:
                     c.islandDensity = IslandDensity.Medium;
                     c.flagLayout = FlagLayout.ThreePoint;
-                    c.spawnDistance = 0.62f;
+                    c.spawnDistance = 0.375f;
                     c.captureRadius = 150f;
                     break;
             }

@@ -12,7 +12,8 @@ namespace Naval
         HydroacousticSearch, SurveillanceRadar,
         DamageControl, RepairParty,
         SonarPing, Hydrophone,
-        Dive
+        Dive,
+        SpotterPlane, SubmarineSurveillance
     }
 
     /// <summary>One consumable slot: charges, cooldown, active duration.</summary>
@@ -53,6 +54,12 @@ namespace Naval
         public float SpeedMultiplier { get; private set; } = 1f;
         public float DetectionBonus { get; private set; } = 0f;      // extra spotting range
         public bool SeesThroughSmoke { get; private set; }
+        /// <summary>Main battery range multiplier, from the spotter aircraft.</summary>
+        public float GunRangeMultiplier { get; private set; } = 1f;
+        /// <summary>Radius inside which contacts are spotted regardless of their concealment.</summary>
+        public float AssuredDetectionRange { get; private set; }
+        /// <summary>Whether that assured detection also reaches submerged boats.</summary>
+        public bool AssuredDetectionSubmerged { get; private set; }
         public float RepairPerSecond { get; private set; }
         public bool SonarActive { get; private set; }
 
@@ -61,6 +68,14 @@ namespace Naval
             _s = s;
             Build(s.Stats.classType);
         }
+
+        // Consumable radii, in world units (1 unit is about 10 m).
+        public const float RadarRange = 1000f;        // 10.0 km
+        public const float HydroRange = 500f;         //  5.0 km
+        public const float HydrophoneRange = 700f;    //  7.0 km
+        public const float SubSurveillanceRange = 900f; // 9.0 km
+        /// <summary>Repair party heal, as a fraction of max HP per second.</summary>
+        public const float RepairFraction = 0.005f;
 
         void Add(AbilityId id, string label, string key, float cooldown, float duration, int charges)
         {
@@ -83,29 +98,35 @@ namespace Naval
                 case ShipClassType.Destroyer:
                     Add(AbilityId.ShellHE, "HE Shells", "1", 0f, 0f, 0);
                     Add(AbilityId.Torpedoes, "Torpedoes", "2", 0f, 0f, 0);
-                    Add(AbilityId.SmokeScreen, "Smoke Screen", "3", 95f, 26f, 4);
-                    Add(AbilityId.EngineBoost, "Engine Boost", "4", 90f, 20f, 4);
+                    Add(AbilityId.SmokeScreen, "Smoke Screen", "3", 160f, 97f, 3);
+                    Add(AbilityId.EngineBoost, "Engine Boost", "4", 120f, 120f, 3);
+                    Add(AbilityId.DamageControl, "Damage Control", "5", 40f, 0f, 0);
                     break;
 
                 case ShipClassType.Cruiser:
                     Add(AbilityId.ShellHE, "HE Shells", "1", 0f, 0f, 0);
                     Add(AbilityId.ShellAP, "AP Shells", "2", 0f, 0f, 0);
-                    Add(AbilityId.HydroacousticSearch, "Hydro Search", "3", 110f, 22f, 3);
-                    Add(AbilityId.SurveillanceRadar, "Radar", "4", 140f, 18f, 2);
+                    Add(AbilityId.SurveillanceRadar, "Radar", "3", 120f, 40f, 3);
+                    Add(AbilityId.HydroacousticSearch, "Hydro Search", "4", 120f, 100f, 3);
+                    Add(AbilityId.RepairParty, "Repair Party", "5", 80f, 28f, 3);
+                    Add(AbilityId.DamageControl, "Damage Control", "6", 60f, 0f, 0);
                     break;
 
                 case ShipClassType.Battleship:
                     Add(AbilityId.ShellHE, "HE Shells", "1", 0f, 0f, 0);
                     Add(AbilityId.ShellAP, "AP Shells", "2", 0f, 0f, 0);
-                    Add(AbilityId.DamageControl, "Damage Control", "3", 80f, 0f, 0);
-                    Add(AbilityId.RepairParty, "Repair Party", "4", 100f, 22f, 3);
+                    Add(AbilityId.DamageControl, "Damage Control", "3", 80f, 20f, 0);
+                    Add(AbilityId.RepairParty, "Repair Party", "4", 80f, 28f, 4);
+                    Add(AbilityId.SpotterPlane, "Spotter Plane", "5", 240f, 100f, 4);
                     ShellType = AbilityId.ShellAP;      // battleships load AP by default
                     break;
 
                 case ShipClassType.Submarine:
                     Add(AbilityId.HomingTorpedoes, "Homing Torps", "1", 0f, 0f, 0);
-                    Add(AbilityId.SonarPing, "Sonar Ping", "2", 18f, 30f, 0);
-                    Add(AbilityId.Hydrophone, "Hydrophone", "3", 70f, 16f, 4);
+                    Add(AbilityId.SonarPing, "Sonar Ping", "2", 6.5f, 25f, 0);
+                    Add(AbilityId.Hydrophone, "Hydrophone", "3", 60f, 30f, 4);
+                    Add(AbilityId.SubmarineSurveillance, "Sub Surveillance", "4", 120f, 60f, 3);
+                    Add(AbilityId.DamageControl, "Damage Control", "5", 40f, 15f, 3);
                     Add(AbilityId.Dive, "Dive / Surface", "X", 0f, 0f, 0);
                     break;
 
@@ -205,6 +226,15 @@ namespace Naval
                     Announce("repair party working");
                     break;
 
+                case AbilityId.SpotterPlane:
+                    Announce("spotter plane away");
+                    break;
+
+                case AbilityId.SubmarineSurveillance:
+                    Announce("submarine surveillance active");
+                    AudioManager.PlayAt(SoundId.Sonar, _s.Position, 0.6f);
+                    break;
+
                 case AbilityId.SonarPing:
                     FireSonarPing();
                     break;
@@ -257,6 +287,9 @@ namespace Naval
             SpeedMultiplier = 1f;
             DetectionBonus = 0f;
             SeesThroughSmoke = false;
+            GunRangeMultiplier = 1f;
+            AssuredDetectionRange = 0f;
+            AssuredDetectionSubmerged = false;
             RepairPerSecond = 0f;
             SonarActive = false;
 
@@ -278,28 +311,48 @@ namespace Naval
             switch (a.id)
             {
                 case AbilityId.EngineBoost:
-                    SpeedMultiplier = 1.28f;
+                    SpeedMultiplier = 1.08f;
+                    break;
+
+                case AbilityId.SpotterPlane:
+                    // the aircraft spots the fall of shot, extending the usable gun range
+                    GunRangeMultiplier = 1.2f;
+                    break;
+
+                case AbilityId.SubmarineSurveillance:
+                    // 9.0 km, and unlike anything else it finds boats at depth
+                    AssuredDetectionRange = Mathf.Max(AssuredDetectionRange, SubSurveillanceRange);
+                    AssuredDetectionSubmerged = true;
                     break;
 
                 case AbilityId.HydroacousticSearch:
-                    DetectionBonus = Mathf.Max(DetectionBonus, 190f);
+                    // 5.0 km against ships, and it hears through smoke and hull noise alike
+                    DetectionBonus = Mathf.Max(DetectionBonus, HydroRange);
+                    AssuredDetectionRange = Mathf.Max(AssuredDetectionRange, HydroRange);
+                    AssuredDetectionSubmerged = true;
                     SeesThroughSmoke = true;
                     SonarActive = true;
                     break;
 
                 case AbilityId.SurveillanceRadar:
-                    DetectionBonus = Mathf.Max(DetectionBonus, 520f);
+                    // 10.0 km, and unlike hydro it reaches straight through islands
+                    DetectionBonus = Mathf.Max(DetectionBonus, RadarRange);
+                    AssuredDetectionRange = Mathf.Max(AssuredDetectionRange, RadarRange);
                     SeesThroughSmoke = true;
                     break;
 
                 case AbilityId.Hydrophone:
-                    DetectionBonus = Mathf.Max(DetectionBonus, 300f);
+                    // the boat's own passive set: 7.0 km, and it hears submerged contacts too
+                    DetectionBonus = Mathf.Max(DetectionBonus, HydrophoneRange);
+                    AssuredDetectionRange = Mathf.Max(AssuredDetectionRange, HydrophoneRange);
+                    AssuredDetectionSubmerged = true;
+                    SeesThroughSmoke = true;
                     SonarActive = true;
                     break;
 
                 case AbilityId.RepairParty:
                     // heals a slice of the hull back, the classic battleship heal
-                    RepairPerSecond = _s.Stats.maxHealth * 0.012f;
+                    RepairPerSecond = _s.Stats.maxHealth * RepairFraction;
                     _s.Damage.Heal(RepairPerSecond * dt);
                     break;
             }

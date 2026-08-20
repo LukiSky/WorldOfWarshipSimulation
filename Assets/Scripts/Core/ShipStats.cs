@@ -20,6 +20,31 @@ namespace Naval
         public bool surfaceOnly = false;      // deck guns cannot fire submerged
         public float frontalArcBlock = 20f;   // degrees around the bow/stern where rear/front turrets cannot fire
 
+        /// <summary>
+        /// Dispersion tightness. Higher values cluster the salvo at the aim point instead of
+        /// spreading it evenly through the pattern; 2.0 is a typical heavy cruiser or battleship.
+        /// </summary>
+        public float sigma = 1.8f;
+
+        /// <summary>
+        /// Plating at or below this thickness (mm) is defeated regardless of impact angle - the
+        /// shell is simply too heavy to be turned. 0 disables overmatch. This is what lets a
+        /// battleship punch through the bow of an angled cruiser that would otherwise bounce it.
+        /// </summary>
+        public float overmatchThreshold = 0f;
+
+        /// <summary>Impact angle from the plate normal (degrees) where ricochets become possible.</summary>
+        public float ricochetStart = 45f;
+        /// <summary>Impact angle from the plate normal (degrees) beyond which the shell always bounces.</summary>
+        public float ricochetAlways = 60f;
+
+        // Explicit high-explosive ballistics. Where these are left at 0 the HE round is derived
+        // from the AP one, which is what the secondary batteries rely on.
+        public float heDamage = 0f;
+        public float hePenetration = 0f;
+        public float heFireChance = 0f;
+        public float heShellSpeed = 0f;
+
         public GunData Clone() => (GunData)MemberwiseClone();
     }
 
@@ -106,8 +131,12 @@ namespace Naval
 
         // Survivability
         public float maxHealth = 1600f;
-        public float armor = 15f;
-        public float citadelArmor = 20f;
+        public float armor = 15f;             // hull/bow plating thickness in mm
+        public float citadelArmor = 20f;      // citadel belt thickness in mm
+        /// <summary>Destroyers and submarines have no citadel: they can never take a citadel hit.</summary>
+        public bool hasCitadel = true;
+        /// <summary>Fraction of torpedo damage absorbed by the anti-torpedo bulge, 0..1.</summary>
+        public float torpedoProtection = 0f;
         public float floodRate = 9f;          // hp/sec per flooding stack
         public float fireRate = 5f;           // hp/sec per fire stack
 
@@ -116,6 +145,8 @@ namespace Naval
         public float spotRange = 620f;
         public float sonarRange = 0f;         // active sonar, detects submerged contacts
         public float hydroRange = 90f;        // detects torpedoes / close contacts through smoke
+        /// <summary>Inside this range the ship is spotted no matter how good its concealment is.</summary>
+        public float assuredDetectionRange = 0f;
 
         // Logistics
         public float fuelCapacity = 100f;

@@ -44,11 +44,17 @@ namespace Naval
         }
 
         /// <summary>Random point inside a unit circle biased toward the centre (naval shell pattern).</summary>
-        public static Vector2 EllipticalScatter(float halfWidth, float halfLength)
+        /// <summary>
+        /// A fall-of-shot pattern: longer along the line of fire than across it. <paramref name="sigma"/>
+        /// is the gun's dispersion tightness - higher values pull the salvo in toward the aim point
+        /// instead of spreading it evenly through the ellipse.
+        /// </summary>
+        public static Vector2 EllipticalScatter(float halfWidth, float halfLength, float sigma = 1.8f)
         {
             float a = Random.value * Mathf.PI * 2f;
             float r = Mathf.Sqrt(Random.value);
-            r = Mathf.Lerp(r, r * r, 0.35f);
+            float centreBias = Mathf.Clamp01((sigma - 1f) * 0.5f);
+            r = Mathf.Lerp(r, r * r, centreBias);
             return new Vector2(Mathf.Cos(a) * r * halfWidth, Mathf.Sin(a) * r * halfLength);
         }
 

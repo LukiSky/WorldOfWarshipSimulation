@@ -282,7 +282,7 @@ namespace Naval
                         : Map.flagLayout == FlagLayout.TwoFlagAssault
                           ? "Take and hold the forward flags. First to " + (int)ScoreToWin + " points, or sink the enemy fleet."
                           : "Hold zones A, B and C. First to " + (int)ScoreToWin + " points, or sink the enemy fleet.";
-                    TimeLimit = 900f;
+                    TimeLimit = 1200f;      // 20:00 - real ship speeds need the sea room
                     break;
                 case GameMode.Skirmish:
                     ObjectiveText = "Destroy the enemy task force.";

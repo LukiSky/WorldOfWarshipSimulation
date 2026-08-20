@@ -81,7 +81,7 @@ namespace Naval
             {
                 var p = sel.Primary;
                 if (p.Stats.mainBattery != null)
-                    LineDrawer.DashedCircle(p.Position, p.Stats.mainBattery.range, 1.1f * ps, new Color(1f, 0.72f, 0.35f, 0.28f), 96);
+                    LineDrawer.DashedCircle(p.Position, p.Weapons.MainRange, 1.1f * ps, new Color(1f, 0.72f, 0.35f, 0.28f), 96);
                 if (p.Stats.torpedoes != null)
                     LineDrawer.DashedCircle(p.Position, p.Stats.torpedoes.range, 1f * ps, new Color(0.4f, 1f, 0.8f, 0.22f), 80);
                 LineDrawer.DashedCircle(p.Position, p.Detectability, 1f * ps, new Color(0.6f, 0.8f, 1f, 0.2f), 72);

@@ -71,7 +71,8 @@ namespace Naval
 
         /// <summary>Full armour interaction for a gun hit. Returns what the shell actually did.</summary>
         public HitResult ApplyShellHit(float damage, float penetration, Vector2 hitPos, float impactHeading,
-                                       Ship attacker, DamageSource source, float fireChance, bool isAP = true)
+                                       Ship attacker, DamageSource source, float fireChance, bool isAP = true,
+                                       float overmatchThreshold = 0f, float ricochetStart = 45f, float ricochetAlways = 60f)
         {
             if (IsSinking || _s.IsDead) return HitResult.Miss;
 
@@ -79,6 +80,15 @@ namespace Naval
             float relative = Mathf.Abs(Mathf.DeltaAngle(_s.Heading, impactHeading));
             float obliquity = Mathf.Abs(Mathf.Cos(relative * Mathf.Deg2Rad));   // 1 = hitting bow/stern on, 0 = flat broadside
             float effectiveArmor = _s.Stats.armor * Mathf.Lerp(1f, 2.6f, obliquity);
+
+            // The belt normal is perpendicular to the hull axis, so obliquity is the sine of the
+            // impact angle measured off that normal: broadside is 0 degrees, bow-on is 90.
+            float impactAngle = Mathf.Asin(Mathf.Clamp01(obliquity)) * Mathf.Rad2Deg;
+
+            // Overmatch: a shell heavy enough for the plating in front of it is not turned by any
+            // angle at all. This is why angling the bow saves a cruiser from most guns but not from
+            // the heaviest battleship rifles.
+            bool overmatch = overmatchThreshold > 0f && _s.Stats.armor <= overmatchThreshold;
 
             HitResult result;
             float applied;
@@ -96,25 +106,47 @@ namespace Naval
                 return result;
             }
 
-            if (penetration < effectiveArmor * 0.55f)
+            // An overmatching shell skips the angle checks entirely and goes straight to the
+            // penetration cases below.
+            bool bounced = false;
+            if (!overmatch && impactAngle >= ricochetStart)
+            {
+                // between the two angles the bounce is a coin weighted by how sharp the impact is
+                float t = Mathf.InverseLerp(ricochetStart, Mathf.Max(ricochetStart + 0.01f, ricochetAlways), impactAngle);
+                bounced = t >= 1f || Random.value < t;
+            }
+
+            if (bounced)
+            {
+                result = HitResult.Ricochet;
+                applied = damage * 0.02f;
+            }
+            else if (!overmatch && penetration < effectiveArmor * 0.55f)
             {
                 result = HitResult.Shatter;
                 applied = damage * 0.06f;
             }
-            else if (penetration < effectiveArmor)
+            else if (!overmatch && penetration < effectiveArmor)
             {
-                result = obliquity > 0.72f ? HitResult.Ricochet : HitResult.Shatter;
-                applied = damage * (result == HitResult.Ricochet ? 0.02f : 0.1f);
+                result = HitResult.Shatter;
+                applied = damage * 0.1f;
             }
-            else if (penetration > effectiveArmor * 5.5f && _s.Stats.classType != ShipClassType.Battleship)
+            else if (_s.Stats.hasCitadel && penetration > _s.Stats.citadelArmor * 1.15f
+                     && obliquity < 0.55f && Random.value < 0.35f)
             {
-                result = HitResult.Overpenetration;
-                applied = damage * 0.28f;
-            }
-            else if (penetration > _s.Stats.citadelArmor * 1.15f && obliquity < 0.55f && Random.value < 0.35f)
-            {
+                // The citadel is checked before overpenetration on purpose. Real penetration figures
+                // are hundreds of millimetres against plating measured in tens, so a plating ratio
+                // test alone would call every heavy hit an overpenetration and no shell would ever
+                // find a magazine.
                 result = HitResult.Citadel;
                 applied = damage * 2.1f;
+            }
+            else if (penetration > effectiveArmor * 5.5f && !_s.Stats.hasCitadel)
+            {
+                // Nothing inside worth arming the fuse for: the shell goes straight through. This is
+                // why battleship rifles are a poor answer to a destroyer.
+                result = HitResult.Overpenetration;
+                applied = damage * 0.28f;
             }
             else
             {
@@ -136,9 +168,8 @@ namespace Naval
         public void ApplyTorpedoHit(float damage, Vector2 hitPos, Ship attacker, float floodChance)
         {
             if (IsSinking || _s.IsDead) return;
-            // torpedo protection scales with hull size
-            float reduction = _s.Stats.classType == ShipClassType.Battleship ? 0.62f
-                            : _s.Stats.classType == ShipClassType.Cruiser ? 0.8f : 1f;
+            // the anti-torpedo bulge absorbs a fraction of the warhead, per ship
+            float reduction = 1f - Mathf.Clamp01(_s.Stats.torpedoProtection);
             ApplyDamage(damage * reduction, attacker, DamageSource.Torpedo, hitPos);
             DamageSystem(ShipSystem.Hull, 0.25f);
             if (Random.value < 0.5f) DamageSystem(ShipSystem.Propulsion, 0.35f);

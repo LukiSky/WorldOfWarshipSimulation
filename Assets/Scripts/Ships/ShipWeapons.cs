@@ -72,15 +72,74 @@ namespace Naval
                 fireChance = gun.fireChance * 0.15f;
                 isAP = true;
             }
+            else if (gun.heDamage > 0f)
+            {
+                // the gun carries a real HE round of its own
+                damage = gun.heDamage;
+                penetration = gun.hePenetration;
+                fireChance = gun.heFireChance;
+                isAP = false;
+            }
             else
             {
-                // HE trades penetration and raw damage for reliable fires
+                // no HE data: derive one. HE trades penetration and raw damage for reliable fires
                 damage = gun.damage * 0.62f;
                 penetration = gun.penetration * 0.28f + 12f;
                 fireChance = gun.fireChance * 2.4f;
                 isAP = false;
             }
         }
+
+        /// <summary>True while the guns are loaded and trained but holding for a friendly in the lane.</summary>
+        public bool CheckingFire { get; private set; }
+
+        /// <summary>
+        /// Is a friendly hull sitting in the corridor between us and where we are about to shoot?
+        ///
+        /// With friendly fire live this is what stops a battle line from shooting its own screen to
+        /// pieces. It deliberately does not apply to a ship the player is conning: if you want to
+        /// fire through your own destroyer that is your decision, and the log will tell you about it.
+        /// </summary>
+        public bool FriendlyInLineOfFire(Vector2 aim, float corridor)
+        {
+            if (_s.IsDirectlyControlled) return false;
+
+            var mates = ShipRegistry.OfTeam(_s.team);
+            Vector2 from = _s.Position;
+            float shotLength = Vector2.Distance(from, aim);
+            if (shotLength < 1f) return false;
+
+            for (int i = 0; i < mates.Count; i++)
+            {
+                var m = mates[i];
+                if (m == null || m == _s || m.IsDead) continue;
+                // a boat under the surface is not in anybody's way
+                if (m.Submarine != null && m.Submarine.IsSubmerged) continue;
+
+                // only care about mates actually between us and the aim point
+                float along = Vector2.Dot(m.Position - from, (aim - from) / shotLength);
+                if (along <= 0f || along >= shotLength) continue;
+
+                float clearance = corridor + m.Stats.length * 0.5f;
+                if (NavalMath.DistanceToSegment(m.Position, from, aim) < clearance) return true;
+            }
+            return false;
+        }
+
+        /// <summary>Main battery reach, including any spotter aircraft currently up.</summary>
+        public float MainRange
+        {
+            get
+            {
+                var mb = _s.Stats.mainBattery;
+                if (mb == null) return 0f;
+                return mb.range * (_s.Abilities != null ? _s.Abilities.GunRangeMultiplier : 1f);
+            }
+        }
+
+        /// <summary>Muzzle velocity for the round currently loaded.</summary>
+        float ShellSpeed(GunData gun) =>
+            !UsingAP && gun.heShellSpeed > 0f ? gun.heShellSpeed : gun.shellSpeed;
 
         public float MainReloadTime
         {
@@ -152,15 +211,26 @@ namespace Naval
             if (!ValidGunTarget(target)) { OnTarget = false; return; }
 
             float dist = Vector2.Distance(_s.Position, target.Position);
-            if (dist > mb.range || dist < mb.minRange) { OnTarget = false; return; }
+            if (dist > MainRange || dist < mb.minRange) { OnTarget = false; return; }
 
             // aim: lead the target for the shell's time of flight
-            if (!NavalMath.Intercept(_s.Position, target.Position, target.Velocity, mb.shellSpeed, out Vector2 aim, out float tof))
+            // lead with the velocity of the round actually loaded, not the AP one
+            if (!NavalMath.Intercept(_s.Position, target.Position, target.Velocity, ShellSpeed(mb), out Vector2 aim, out float tof))
                 aim = target.Position;
             AimPoint = aim;
 
             int barrels = TrainTurrets(aim, out float bearing);
             if (MainReload > 0f || barrels == 0) return;
+
+            // Check fire: a squadron mate has drifted into the line. Keep the turrets trained and
+            // wait for the lane to clear rather than shooting through them.
+            if (GameConfig.FriendlyFire && FriendlyInLineOfFire(aim, mb.dispersion * 0.9f))
+            {
+                CheckingFire = true;
+                return;
+            }
+            CheckingFire = false;
+
             if (!_s.Resources.ConsumeMain(barrels)) return;
 
             ShellProfile(mb, out float dmg, out float pen, out float fire, out bool isAP);
@@ -203,8 +273,8 @@ namespace Naval
 
             float dist = Vector2.Distance(_s.Position, AimPoint);
             Vector2 aim = AimPoint;
-            if (dist > mb.range)
-                aim = _s.Position + (AimPoint - _s.Position).normalized * mb.range;   // shoot as far as we can
+            if (dist > MainRange)
+                aim = _s.Position + (AimPoint - _s.Position).normalized * MainRange;   // shoot as far as we can
 
             int barrels = TrainTurrets(aim, out float bearing);
             if (barrels == 0) return false;
@@ -239,11 +309,12 @@ namespace Naval
             for (int b = 0; b < barrels; b++)
             {
                 // naval patterns are longer along the line of fire than across it
-                Vector2 scatter = NavalMath.EllipticalScatter(sigma * 0.55f, sigma * 1.5f);
+                Vector2 scatter = NavalMath.EllipticalScatter(sigma * 0.55f, sigma * 1.5f, gun.sigma);
                 Vector2 point = aim + perp * scatter.x + los * scatter.y;
                 Vector2 muzzle = _s.Position + NavalMath.HeadingToVector(bearing) * _s.Stats.length * 0.3f;
-                ProjectileSystem.I.FireShell(_s, muzzle, point, gun.shellSpeed, damage, penetration,
-                    fireChance, source, big, isAP);
+                ProjectileSystem.I.FireShell(_s, muzzle, point, ShellSpeed(gun), damage, penetration,
+                    fireChance, source, big, isAP,
+                    isAP ? gun.overmatchThreshold : 0f, gun.ricochetStart, gun.ricochetAlways);
             }
 
             ParticleFX.MuzzleFlash(_s.Position + NavalMath.HeadingToVector(bearing) * _s.Stats.length * 0.28f,
@@ -322,6 +393,13 @@ namespace Naval
         {
             var td = _s.Stats.torpedoes;
             if (!CanLaunchTorpedoesAt(point, out float heading)) return false;
+
+            // Torpedoes run for kilometres and do not care whose hull they meet. Give the spread a
+            // wide berth around friendlies - wider than for guns, because the fish keep going.
+            if (GameConfig.FriendlyFire && td != null &&
+                FriendlyInLineOfFire(_s.Position + NavalMath.HeadingToVector(heading) * td.range,
+                                     Mathf.Max(30f, td.range * Mathf.Sin(td.spread * Mathf.Deg2Rad) + 25f)))
+                return false;
 
             int tubes = Mathf.Min(td.launchers * td.tubesPerLauncher, _s.Resources.TorpedoAmmo);
             if (tubes <= 0) return false;

@@ -25,6 +25,8 @@ namespace Naval
             public float arcHeight;
             public bool big;
             public bool isAP;            // armour piercing, otherwise high explosive
+            public float overmatch;      // plating thickness this shell defeats regardless of angle
+            public float ricochetStart, ricochetAlways;
         }
 
         public class Torpedo
@@ -79,7 +81,8 @@ namespace Naval
         // ---------------------------------------------------------------- spawning
 
         public void FireShell(Ship owner, Vector2 from, Vector2 aimPoint, float shellSpeed, float damage,
-                              float penetration, float fireChance, DamageSource source, bool big, bool isAP = true)
+                              float penetration, float fireChance, DamageSource source, bool big, bool isAP = true,
+                              float overmatch = 0f, float ricochetStart = 45f, float ricochetAlways = 60f)
         {
             float dist = Vector2.Distance(from, aimPoint);
             float tof = Mathf.Max(0.1f, dist / Mathf.Max(20f, shellSpeed));
@@ -98,7 +101,10 @@ namespace Naval
                 source = source,
                 arcHeight = Mathf.Min(dist * 0.16f, 60f),
                 big = big,
-                isAP = isAP
+                isAP = isAP,
+                overmatch = overmatch,
+                ricochetStart = ricochetStart,
+                ricochetAlways = ricochetAlways
             });
         }
 
@@ -169,7 +175,8 @@ namespace Naval
             for (int i = 0; i < candidates.Count; i++)
             {
                 var c = candidates[i];
-                if (c.team == s.team) continue;
+                if (c == s.owner) continue;                                     // never our own hull
+                if (!GameConfig.FriendlyFire && c.team == s.team) continue;
                 if (c.Submarine != null && c.Submarine.IsSubmerged) continue;   // shells cannot reach a dived boat
                 if (NavalMath.InsideHull(s.aim, c.Position, c.Heading, c.Stats.length, c.Stats.beam * 1.35f))
                 {
@@ -181,7 +188,11 @@ namespace Naval
             if (hit != null)
             {
                 float impactHeading = NavalMath.VectorToHeading(s.aim - s.start);
-                var result = hit.Damage.ApplyShellHit(s.damage, s.penetration, s.aim, impactHeading, s.owner, s.source, s.fireChance, s.isAP);
+                bool fratricide = s.owner != null && hit.team == s.owner.team;
+                float dmg = fratricide ? s.damage * GameConfig.FriendlyFireScale : s.damage;
+                var result = hit.Damage.ApplyShellHit(dmg, s.penetration, s.aim, impactHeading, s.owner, s.source,
+                                                     s.fireChance, s.isAP, s.overmatch, s.ricochetStart, s.ricochetAlways);
+                if (fratricide) ReportFriendlyFire(s.owner, hit, "shell");
                 ParticleFX.Explosion(s.aim, s.big ? 2.2f : 1.1f);
                 AudioManager.PlayAt(SoundId.Impact, s.aim, s.big ? 0.9f : 0.5f);
                 if (result == HitResult.Citadel)
@@ -212,6 +223,26 @@ namespace Naval
                         }
                     }
             }
+        }
+
+        /// <summary>
+        /// Tells the player when their own side has been hit. Throttled per victim so a torpedo
+        /// spread or a straddling salvo does not bury the log.
+        /// </summary>
+        static readonly Dictionary<int, float> _lastFriendlyReport = new Dictionary<int, float>();
+
+        static void ReportFriendlyFire(Ship shooter, Ship victim, string weapon)
+        {
+            if (shooter == null || victim == null) return;
+            if (victim.team != Team.Player && shooter.team != Team.Player) return;
+
+            _lastFriendlyReport.TryGetValue(victim.id, out float last);
+            if (Time.time - last < 3f) return;
+            _lastFriendlyReport[victim.id] = Time.time;
+
+            GameEvents.RaiseMessage("FRIENDLY FIRE - " + shooter.shipName + " hit " + victim.shipName
+                                    + " with a " + weapon, Team.Player);
+            AudioManager.PlayUI(SoundId.Alarm, 0.5f);
         }
 
         void UpdateTorpedoes(float dt)
@@ -259,11 +290,15 @@ namespace Naval
                     for (int j = 0; j < near.Count; j++)
                     {
                         var s = near[j];
-                        if (s.team == t.team) continue;
+                        if (s == t.owner) continue;                             // the boat that fired it
+                        if (!GameConfig.FriendlyFire && s.team == t.team) continue;
                         if (s.Submarine != null && s.Submarine.Depth == DepthState.Deep) continue;
                         if (!NavalMath.InsideHull(t.pos, s.Position, s.Heading, s.Stats.length, s.Stats.beam * 1.5f)) continue;
 
-                        s.Damage.ApplyTorpedoHit(t.damage, t.pos, t.owner, t.floodChance);
+                        bool ffTorp = t.owner != null && s.team == t.owner.team;
+                        s.Damage.ApplyTorpedoHit(t.damage * (ffTorp ? GameConfig.FriendlyFireScale : 1f),
+                                                 t.pos, t.owner, t.floodChance);
+                        if (ffTorp) ReportFriendlyFire(t.owner, s, "torpedo");
                         ParticleFX.Explosion(t.pos, 3.2f, true);
                         ParticleFX.Splash(t.pos, 4f);
                         AudioManager.PlayAt(SoundId.Explosion, t.pos, 1f);
@@ -301,13 +336,16 @@ namespace Naval
                 for (int j = 0; j < near.Count; j++)
                 {
                     var s = near[j];
-                    if (s.team == c.team) continue;
+                    if (s == c.owner) continue;
+                    if (!GameConfig.FriendlyFire && s.team == c.team) continue;
                     float dist = Vector2.Distance(s.Position, c.pos);
                     float falloff = 1f - Mathf.Clamp01(dist / c.radius);
                     float vuln = s.Submarine != null ? s.Submarine.DepthChargeVulnerability : 0.25f;
                     float dmg = c.damage * falloff * vuln;
+                    if (c.owner != null && s.team == c.owner.team) dmg *= GameConfig.FriendlyFireScale;
                     if (dmg <= 1f) continue;
                     s.Damage.ApplyDamage(dmg, c.owner, DamageSource.DepthCharge, c.pos);
+                    if (c.owner != null && s.team == c.owner.team) ReportFriendlyFire(c.owner, s, "depth charge");
                     if (s.Submarine != null)
                     {
                         s.Damage.DamageSystem(ShipSystem.Hull, 0.1f * falloff);
