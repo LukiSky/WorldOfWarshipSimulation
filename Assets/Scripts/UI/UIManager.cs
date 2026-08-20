@@ -35,6 +35,8 @@ namespace Naval
             public System.Func<int> get;
             public System.Action<int> set;
             public System.Func<bool> visible;
+            /// <summary>Turns the raw value into the readout text. Not every slider counts ships.</summary>
+            public System.Func<int, string> format;
             public bool dragging;
         }
 
@@ -588,7 +590,8 @@ namespace Naval
         // ------------------------------------------------------------------ fleet selection menu
 
         UISlider Slider(string name, Transform parent, Vector2 offMin, Vector2 offMax,
-                        int min, int max, System.Func<int> get, System.Action<int> set)
+                        int min, int max, System.Func<int> get, System.Action<int> set,
+                        System.Func<int, string> format = null)
         {
             var track = Panel(name + "Track", parent, new Vector2(0f, 1f), new Vector2(0f, 1f),
                 offMin, offMax, new Color(0f, 0f, 0f, 0.5f), false);
@@ -605,7 +608,8 @@ namespace Naval
             var readout = Label(name + "Val", track, "", 15, TextAnchor.MiddleCenter, TextMain,
                 Vector2.zero, Vector2.one, Vector2.zero, Vector2.zero, FontStyle.Bold);
 
-            var s = new UISlider { track = track, fill = fill, readout = readout, min = min, max = max, get = get, set = set };
+            var s = new UISlider { track = track, fill = fill, readout = readout, min = min, max = max,
+                                   get = get, set = set, format = format };
             _sliders.Add(s);
             return s;
         }
@@ -663,7 +667,7 @@ namespace Naval
             for (int i = 0; i < classes.Length; i++)
             {
                 var cls = classes[i];
-                float y = -196f - i * 52f;
+                float y = -196f - i * 64f;
 
                 Label("Cls" + i, p, ShipDatabase.ShortTag(cls) + "  " + cls.ToString().ToUpper(), 15, TextAnchor.UpperLeft, TextMain,
                     new Vector2(0f, 1f), new Vector2(0f, 1f), new Vector2(30f, y - 20f), new Vector2(220f, y), FontStyle.Bold);
@@ -737,7 +741,8 @@ namespace Naval
             Slider("CapRadius", p, new Vector2(122f, -556f), new Vector2(420f, -530f),
                 Mathf.RoundToInt(MapConfig.MinCaptureRadius), Mathf.RoundToInt(MapConfig.MaxCaptureRadius),
                 () => Mathf.RoundToInt(_menuMap.captureRadius),
-                v => _menuMap.captureRadius = v);
+                v => _menuMap.captureRadius = v,
+                v => (v * 10) + " m RADIUS");        // 1 world unit is about 10 m
 
             _mapSummaryText = Label("MapSummary", p, "", 12, TextAnchor.MiddleLeft, TextDim,
                 new Vector2(0f, 1f), new Vector2(1f, 1f), new Vector2(430f, -556f), new Vector2(-30f, -530f));
@@ -912,7 +917,7 @@ namespace Naval
                 s.fill.rectTransform.localScale = new Vector3(Mathf.Clamp01(frac), 1f, 1f);
                 s.fill.color = s.dragging || over
                     ? new Color(0.32f, 0.72f, 0.95f, 0.95f) : new Color(0.2f, 0.55f, 0.75f, 0.95f);
-                s.readout.text = v + " SHIPS";
+                s.readout.text = s.format != null ? s.format(v) : v + " SHIPS";
             }
         }
 
