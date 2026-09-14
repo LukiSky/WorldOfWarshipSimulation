@@ -79,7 +79,7 @@ namespace Naval
             public Image bg, cooldownFill, activeGlow;
             public Text key, label, charges;
         }
-        readonly ActionSlot[] _slots = new ActionSlot[4];
+        readonly ActionSlot[] _slots = new ActionSlot[7];
         Text _ammoLabel, _subLabel;
         Image _subBatteryFill, _throttleFill;
         Text _throttleLabel;
@@ -90,6 +90,9 @@ namespace Naval
 
         // overlays
         GameObject _deployPanel, _endPanel, _helpPanel, _menuPanel;
+        GameObject _editorPanel;
+        Text _editorStatus, _editorCounts, _editorLoadList;
+        string _editorNameEntry = "New Scenario";
         Text _endTitle, _endBody, _deployText, _menuTotalText;
         Text _warningText;
         float _warningTimer;
@@ -139,6 +142,7 @@ namespace Naval
             BuildMinimap();
             BuildWarning();
             BuildDeployPanel();
+            BuildEditorPanel();
             BuildEndPanel();
             BuildHelpPanel();
             BuildFleetMenu();
@@ -515,7 +519,7 @@ namespace Naval
         void BuildActionBar()
         {
             _actionBar = Panel("ActionBar", _canvas.transform, new Vector2(0.5f, 0f), new Vector2(0.5f, 0f),
-                new Vector2(-330f, 12f), new Vector2(330f, 150f));
+                new Vector2(-438f, 12f), new Vector2(438f, 150f));
 
             Label("BarTitle", _actionBar, "CONSUMABLES", 13, TextAnchor.UpperLeft, Accent,
                 new Vector2(0f, 1f), new Vector2(1f, 1f), new Vector2(10f, -20f), new Vector2(-10f, -2f), FontStyle.Bold);
@@ -523,12 +527,12 @@ namespace Naval
             _ammoLabel = Label("Ammo", _actionBar, "", 13, TextAnchor.UpperRight, new Color(1f, 0.85f, 0.4f),
                 new Vector2(0f, 1f), new Vector2(1f, 1f), new Vector2(10f, -20f), new Vector2(-10f, -2f), FontStyle.Bold);
 
-            for (int i = 0; i < 4; i++)
+            for (int i = 0; i < _slots.Length; i++)
             {
-                float x0 = 12f + i * 132f;
+                float x0 = 12f + i * 123f;
                 var slot = new ActionSlot();
                 slot.rect = Panel("Slot" + i, _actionBar, new Vector2(0f, 1f), new Vector2(0f, 1f),
-                    new Vector2(x0, -96f), new Vector2(x0 + 124f, -26f), new Color(0.11f, 0.17f, 0.24f, 0.95f), false);
+                    new Vector2(x0, -96f), new Vector2(x0 + 115f, -26f), new Color(0.11f, 0.17f, 0.24f, 0.95f), false);
                 slot.bg = slot.rect.GetComponent<Image>();
 
                 // cooldown sweep drawn as a bottom-up fill behind the text
@@ -542,7 +546,7 @@ namespace Naval
                 slot.cooldownFill.color = new Color(0.05f, 0.09f, 0.14f, 0.82f);
                 slot.cooldownFill.raycastTarget = false;
 
-                slot.key = Label("Key", slot.rect, (i + 1).ToString(), 15, TextAnchor.UpperLeft, Accent,
+                slot.key = Label("Key", slot.rect, "", 15, TextAnchor.UpperLeft, Accent,
                     new Vector2(0f, 1f), new Vector2(0f, 1f), new Vector2(7f, -22f), new Vector2(27f, -3f), FontStyle.Bold);
                 slot.label = Label("Name", slot.rect, "", 12, TextAnchor.MiddleCenter, TextMain,
                     new Vector2(0f, 0f), new Vector2(1f, 1f), new Vector2(4f, 14f), new Vector2(-4f, -20f));
@@ -760,6 +764,11 @@ namespace Naval
             Button("RESET", p, new Vector2(0f, 0f), new Vector2(0f, 0f), new Vector2(30f, 18f), new Vector2(170f, 52f),
                 () => { _menuSetup = FleetSetup.Default(); });
 
+            // hand-authored battles for training live on their own screen
+            Button("SCENARIO EDITOR", p, new Vector2(1f, 0f), new Vector2(1f, 0f),
+                new Vector2(-210f, 18f), new Vector2(-30f, 52f),
+                () => GameManager.I.EnterEditor(), null, null, new Color(0.18f, 0.26f, 0.40f, 0.95f));
+
             Button("LAUNCH BATTLE", p, new Vector2(0.5f, 0f), new Vector2(0.5f, 0f), new Vector2(-130f, 18f), new Vector2(130f, 52f),
                 () => GameManager.I.StartFromMenu(_menuSetup, 0, _menuMap),
                 MenuIsValid, null, new Color(0.15f, 0.42f, 0.3f, 0.95f));
@@ -775,6 +784,214 @@ namespace Naval
         }
 
         // ------------------------------------------------------------------ overlays
+
+        // ------------------------------------------------------------------ scenario editor
+
+        void BuildEditorPanel()
+        {
+            // a frame rather than a full-screen sheet: the map has to stay visible and clickable
+            var p = Panel("EditorPanel", _canvas.transform, Vector2.zero, Vector2.one,
+                Vector2.zero, Vector2.zero, new Color(0f, 0f, 0f, 0f), false);
+            _editorPanel = p.gameObject;
+
+            // ---- top strip -------------------------------------------------
+            var top = Panel("EdTop", p, new Vector2(0f, 1f), new Vector2(1f, 1f),
+                new Vector2(0f, -46f), new Vector2(0f, 0f), new Color(0.04f, 0.08f, 0.13f, 0.96f));
+            Label("EdTitle", top, "SCENARIO EDITOR", 20, TextAnchor.MiddleLeft, Accent,
+                new Vector2(0f, 0f), new Vector2(0f, 1f), new Vector2(16f, 0f), new Vector2(240f, 0f), FontStyle.Bold);
+            _editorCounts = Label("EdCounts", top, "", 13, TextAnchor.MiddleLeft, TextDim,
+                new Vector2(0f, 0f), new Vector2(0f, 1f), new Vector2(250f, 0f), new Vector2(700f, 0f));
+
+            Button("SAVE", top, new Vector2(1f, 0f), new Vector2(1f, 1f), new Vector2(-560f, 8f), new Vector2(-470f, -8f),
+                () => SaveScenario());
+            Button("LOAD", top, new Vector2(1f, 0f), new Vector2(1f, 1f), new Vector2(-462f, 8f), new Vector2(-372f, -8f),
+                () => LoadScenario());
+            Button("CLEAR", top, new Vector2(1f, 0f), new Vector2(1f, 1f), new Vector2(-364f, 8f), new Vector2(-274f, -8f),
+                () => { if (ScenarioEditor.I != null) ScenarioEditor.I.ClearAll(); });
+            Button("BACK", top, new Vector2(1f, 0f), new Vector2(1f, 1f), new Vector2(-266f, 8f), new Vector2(-176f, -8f),
+                () => GameManager.I.EnterMenu(true));
+            Button("PLAY SCENARIO", top, new Vector2(1f, 0f), new Vector2(1f, 1f), new Vector2(-168f, 8f), new Vector2(-12f, -8f),
+                () => { if (ScenarioEditor.I != null) GameManager.I.BeginScenario(ScenarioEditor.I.Current); },
+                () => ScenarioEditor.I != null && !ScenarioEditor.I.Current.IsEmpty,
+                null, new Color(0.15f, 0.42f, 0.3f, 0.95f));
+
+            // ---- left tool palette ------------------------------------------
+            var left = Panel("EdTools", p, new Vector2(0f, 0f), new Vector2(0f, 1f),
+                new Vector2(0f, 0f), new Vector2(212f, -46f), new Color(0.04f, 0.08f, 0.13f, 0.94f));
+
+            Label("ToolHdr", left, "TOOL", 13, TextAnchor.MiddleLeft, Accent,
+                new Vector2(0f, 1f), new Vector2(1f, 1f), new Vector2(14f, -30f), new Vector2(-10f, -10f), FontStyle.Bold);
+            var tools = new[] { EditorTool.Select, EditorTool.PlaceShip, EditorTool.PlaceZone, EditorTool.PlaceIsland };
+            var toolNames = new[] { "SELECT / MOVE", "PLACE SHIP", "PLACE ZONE", "PLACE ISLAND" };
+            for (int i = 0; i < tools.Length; i++)
+            {
+                var t = tools[i];
+                float y = -38f - i * 34f;
+                Button(toolNames[i], left, new Vector2(0f, 1f), new Vector2(1f, 1f),
+                    new Vector2(12f, y - 30f), new Vector2(-12f, y),
+                    () => { if (ScenarioEditor.I != null) ScenarioEditor.I.Tool = t; },
+                    null, () => ScenarioEditor.I != null && ScenarioEditor.I.Tool == t);
+            }
+
+            Label("SideHdr", left, "SIDE", 13, TextAnchor.MiddleLeft, Accent,
+                new Vector2(0f, 1f), new Vector2(1f, 1f), new Vector2(14f, -200f), new Vector2(-10f, -180f), FontStyle.Bold);
+            var teams = new[] { Team.Player, Team.Enemy };
+            var teamNames = new[] { "FRIENDLY", "HOSTILE" };
+            for (int i = 0; i < teams.Length; i++)
+            {
+                var t = teams[i];
+                float x = 12f + i * 96f;
+                Button(teamNames[i], left, new Vector2(0f, 1f), new Vector2(0f, 1f),
+                    new Vector2(x, -238f), new Vector2(x + 88f, -208f),
+                    () => { if (ScenarioEditor.I != null) ScenarioEditor.I.PaletteTeam = t; },
+                    null, () => ScenarioEditor.I != null && ScenarioEditor.I.PaletteTeam == t);
+            }
+
+            Label("ClsHdr", left, "SHIP CLASS", 13, TextAnchor.MiddleLeft, Accent,
+                new Vector2(0f, 1f), new Vector2(1f, 1f), new Vector2(14f, -272f), new Vector2(-10f, -252f), FontStyle.Bold);
+            var classes = new[] { ShipClassType.Battleship, ShipClassType.Cruiser,
+                                  ShipClassType.Destroyer, ShipClassType.Submarine };
+            for (int i = 0; i < classes.Length; i++)
+            {
+                var c = classes[i];
+                float y = -282f - i * 32f;
+                Button(ShipDatabase.ShortTag(c) + "  " + c.ToString().ToUpper(), left,
+                    new Vector2(0f, 1f), new Vector2(1f, 1f), new Vector2(12f, y - 28f), new Vector2(-12f, y),
+                    () => { if (ScenarioEditor.I != null) { ScenarioEditor.I.PaletteClass = c; ScenarioEditor.I.Tool = EditorTool.PlaceShip; } },
+                    null, () => ScenarioEditor.I != null && ScenarioEditor.I.PaletteClass == c);
+            }
+
+            Label("EdHelp", left, "Left click places or picks.\nDrag to move, drag a rim to resize.\nRight-drag turns a ship.\nDelete removes the selection.",
+                11, TextAnchor.UpperLeft, TextDim,
+                new Vector2(0f, 0f), new Vector2(1f, 0f), new Vector2(12f, 84f), new Vector2(-12f, 168f));
+
+            _editorStatus = Label("EdStatus", left, "", 12, TextAnchor.LowerLeft, new Color(1f, 0.85f, 0.4f),
+                new Vector2(0f, 0f), new Vector2(1f, 0f), new Vector2(12f, 12f), new Vector2(-12f, 76f));
+
+            // ---- right settings inspector ------------------------------------
+            var right = Panel("EdSettings", p, new Vector2(1f, 0f), new Vector2(1f, 1f),
+                new Vector2(-236f, 0f), new Vector2(0f, -46f), new Color(0.04f, 0.08f, 0.13f, 0.94f));
+
+            Label("SetHdr", right, "MATCH SETTINGS", 13, TextAnchor.MiddleLeft, Accent,
+                new Vector2(0f, 1f), new Vector2(1f, 1f), new Vector2(14f, -30f), new Vector2(-10f, -10f), FontStyle.Bold);
+
+            Label("WxHdr2", right, "WEATHER", 11, TextAnchor.MiddleLeft, TextDim,
+                new Vector2(0f, 1f), new Vector2(1f, 1f), new Vector2(14f, -56f), new Vector2(-10f, -38f));
+            var wx = new[] { WeatherType.Clear, WeatherType.Fog, WeatherType.Rain, WeatherType.Storm };
+            for (int i = 0; i < wx.Length; i++)
+            {
+                var w = wx[i];
+                float x = 12f + (i % 2) * 106f;
+                float y = -62f - (i / 2) * 30f;
+                Button(w.ToString().ToUpper(), right, new Vector2(0f, 1f), new Vector2(0f, 1f),
+                    new Vector2(x, y - 26f), new Vector2(x + 98f, y),
+                    () => { if (ScenarioEditor.I != null) ScenarioEditor.I.Current.weather = w; },
+                    null, () => ScenarioEditor.I != null && ScenarioEditor.I.Current.weather == w);
+            }
+
+            Label("MapHdr2", right, "BATTLEFIELD", 11, TextAnchor.MiddleLeft, TextDim,
+                new Vector2(0f, 1f), new Vector2(1f, 1f), new Vector2(14f, -140f), new Vector2(-10f, -122f));
+            var presets = new[] { MapPreset.OceanArchipelago, MapPreset.OpenSea, MapPreset.StraitClash };
+            var presetNames = new[] { "ARCHIPELAGO", "OPEN SEA", "STRAIT CLASH" };
+            for (int i = 0; i < presets.Length; i++)
+            {
+                var mp = presets[i];
+                float y = -146f - i * 30f;
+                Button(presetNames[i], right, new Vector2(0f, 1f), new Vector2(1f, 1f),
+                    new Vector2(12f, y - 26f), new Vector2(-12f, y),
+                    () => { if (ScenarioEditor.I != null) ScenarioEditor.I.Current.preset = mp; },
+                    null, () => ScenarioEditor.I != null && ScenarioEditor.I.Current.preset == mp);
+            }
+
+            Label("AiHdr", right, "ENEMY SKILL", 11, TextAnchor.MiddleLeft, TextDim,
+                new Vector2(0f, 1f), new Vector2(1f, 1f), new Vector2(14f, -240f), new Vector2(-10f, -222f));
+            var diffs = new[] { AIDifficulty.Recruit, AIDifficulty.Veteran, AIDifficulty.Elite };
+            for (int i = 0; i < diffs.Length; i++)
+            {
+                var d = diffs[i];
+                float x = 12f + i * 71f;
+                Button(d.ToString().ToUpper().Substring(0, 3), right, new Vector2(0f, 1f), new Vector2(0f, 1f),
+                    new Vector2(x, -272f), new Vector2(x + 63f, -246f),
+                    () => { if (ScenarioEditor.I != null) ScenarioEditor.I.Current.aiDifficulty = d; },
+                    null, () => ScenarioEditor.I != null && ScenarioEditor.I.Current.aiDifficulty == d);
+            }
+
+            Label("TimeHdr", right, "TIME LIMIT", 11, TextAnchor.MiddleLeft, TextDim,
+                new Vector2(0f, 1f), new Vector2(1f, 1f), new Vector2(14f, -300f), new Vector2(-10f, -282f));
+            Slider("EdTime", right, new Vector2(12f, -332f), new Vector2(224f, -306f), 5, 40,
+                () => ScenarioEditor.I != null ? Mathf.RoundToInt(ScenarioEditor.I.Current.timeLimit / 60f) : 20,
+                v => { if (ScenarioEditor.I != null) ScenarioEditor.I.Current.timeLimit = v * 60f; },
+                v => v + " MIN");
+
+            Label("SeedHdr", right, "MAP SEED", 11, TextAnchor.MiddleLeft, TextDim,
+                new Vector2(0f, 1f), new Vector2(1f, 1f), new Vector2(14f, -360f), new Vector2(-10f, -342f));
+            Slider("EdSeed", right, new Vector2(12f, -392f), new Vector2(224f, -366f), 1, 9999,
+                () => ScenarioEditor.I != null ? ScenarioEditor.I.Current.seed : 1,
+                v => { if (ScenarioEditor.I != null) ScenarioEditor.I.Current.seed = v; },
+                v => "SEED " + v);
+
+            Button("FOG OF WAR", right, new Vector2(0f, 1f), new Vector2(1f, 1f),
+                new Vector2(12f, -430f), new Vector2(-12f, -400f),
+                () => { if (ScenarioEditor.I != null) ScenarioEditor.I.Current.fogOfWar = !ScenarioEditor.I.Current.fogOfWar; },
+                null, () => ScenarioEditor.I != null && ScenarioEditor.I.Current.fogOfWar);
+
+            Label("SavedHdr", right, "SAVED SCENARIOS", 11, TextAnchor.MiddleLeft, TextDim,
+                new Vector2(0f, 1f), new Vector2(1f, 1f), new Vector2(14f, -462f), new Vector2(-10f, -444f));
+            _editorLoadList = Label("SavedList", right, "", 11, TextAnchor.UpperLeft, TextMain,
+                new Vector2(0f, 0f), new Vector2(1f, 1f), new Vector2(14f, 12f), new Vector2(-12f, -468f));
+
+            _editorPanel.SetActive(false);
+        }
+
+        void SaveScenario()
+        {
+            var ed = ScenarioEditor.I;
+            if (ed == null) return;
+            string err;
+            if (ed.Current.Save(out err))
+                GameEvents.RaiseMessage("Saved scenario '" + ed.Current.scenarioName + "'", Team.Neutral);
+            else
+                GameEvents.RaiseMessage("Could not save: " + err, Team.Neutral);
+        }
+
+        /// <summary>Loads the most recently saved scenario. The list on the right shows what is there.</summary>
+        void LoadScenario()
+        {
+            var ed = ScenarioEditor.I;
+            if (ed == null) return;
+            var names = Scenario.ListSaved();
+            if (names.Count == 0) { GameEvents.RaiseMessage("No saved scenarios yet", Team.Neutral); return; }
+
+            // cycle through the saved files so repeated clicks walk the list
+            int idx = names.IndexOf(Scenario.SafeFileName(ed.Current.scenarioName));
+            string pick = names[(idx + 1 + names.Count) % names.Count];
+
+            string err;
+            var loaded = Scenario.Load(pick, out err);
+            if (loaded == null) { GameEvents.RaiseMessage("Could not load: " + err, Team.Neutral); return; }
+            ed.Current = loaded;
+            GameEvents.RaiseMessage("Loaded scenario '" + loaded.scenarioName + "'", Team.Neutral);
+        }
+
+        void RefreshEditor()
+        {
+            var ed = ScenarioEditor.I;
+            if (ed == null) return;
+            var sc = ed.Current;
+            _editorCounts.text = sc.scenarioName + "   |   " + sc.CountOf(Team.Player) + " friendly, " +
+                                 sc.CountOf(Team.Enemy) + " hostile   |   " + sc.zones.Count + " zones   |   " +
+                                 sc.islands.Count + " islands";
+            _editorStatus.text = ed.Status;
+
+            var names = Scenario.ListSaved();
+            if (names.Count == 0) _editorLoadList.text = "(none saved yet)";
+            else
+            {
+                var sb = new System.Text.StringBuilder();
+                for (int i = 0; i < names.Count && i < 12; i++) sb.AppendLine("- " + names[i]);
+                _editorLoadList.text = sb.ToString();
+            }
+        }
 
         void BuildDeployPanel()
         {
@@ -1306,6 +1523,10 @@ namespace Naval
             if (_menuPanel.activeSelf != menu) _menuPanel.SetActive(menu);
             if (menu) RefreshMenu();
 
+            bool editing = gm.Phase == GamePhase.Editor;
+            if (_editorPanel.activeSelf != editing) _editorPanel.SetActive(editing);
+            if (editing) RefreshEditor();
+
             bool deploy = gm.Phase == GamePhase.Deployment;
             if (_deployPanel.activeSelf != deploy) _deployPanel.SetActive(deploy);
             if (deploy) _deployText.text = gm.DeploymentBriefing();
@@ -1319,8 +1540,8 @@ namespace Naval
                 _endBody.text = gm.ResultSummary;
             }
 
-            // world HUD is meaningless on the menu screen
-            bool inWorld = !menu;
+            // world HUD is meaningless on the menu screen and in the editor
+            bool inWorld = !menu && !editing;
             if (_shipPanel.activeSelf != inWorld) _shipPanel.SetActive(inWorld);
             if (_fleetPanel.gameObject.activeSelf != (inWorld && !deploy)) _fleetPanel.gameObject.SetActive(inWorld && !deploy);
         }

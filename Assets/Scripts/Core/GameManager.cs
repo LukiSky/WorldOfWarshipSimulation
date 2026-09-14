@@ -223,11 +223,124 @@ namespace Naval
             BeginMatch(Mode, seed == 0 ? Random.Range(1, 999999) : seed, rebuild);
         }
 
+        /// <summary>The scenario currently being played, if the match came from the editor.</summary>
+        public Scenario ActiveScenario { get; private set; }
+
+        /// <summary>Opens the scenario editor on top of a freshly generated world to draw on.</summary>
+        public void EnterEditor()
+        {
+            Phase = GamePhase.Editor;
+            ApplyTimeScale();
+        }
+
+        /// <summary>
+        /// Builds a hand-authored battle: the scenario's terrain and objectives, and its exact ship
+        /// list rather than the procedural three-squadron deployment.
+        /// </summary>
+        public void BeginScenario(Scenario sc)
+        {
+            if (sc == null) return;
+            ActiveScenario = sc;
+
+            Mode = GameMode.Domination;
+            _seed = sc.seed;
+            Phase = GamePhase.Deployment;
+            BattleTime = 0f;
+            PlayerScore = EnemyScore = 0f;
+            PlayerKills = EnemyKills = 0;
+            _repair[0] = _repair[1] = 100f;
+            ResultSummary = "";
+            EnemyDifficulty = sc.aiDifficulty;
+            ApplyTimeScale();
+
+            ClearBattlefield();
+
+            var map = sc.preset == MapPreset.OpenSea ? MapConfig.ForPreset(MapPreset.OpenSea)
+                    : sc.preset == MapPreset.StraitClash ? MapConfig.ForPreset(MapPreset.StraitClash)
+                    : MapConfig.ForPreset(MapPreset.OceanArchipelago);
+            map.weather = sc.weather;
+            map.islandDensity = sc.density;
+            Map = map;
+
+            int largest = Mathf.Max(1, Mathf.Max(sc.CountOf(Team.Player), sc.CountOf(Team.Enemy)));
+            WorldMap.I.ConfigureDeployment(largest);
+            WorldMap.I.ApplyScenario(sc);
+            WorldMap.I.Generate(sc.seed, Mode, 512, Map);
+            NavGrid.I.Build(WorldMap.I);
+
+            if (WeatherSystem.I != null) WeatherSystem.I.ForceWeather(sc.weather);
+            if (Minimap.I != null) Minimap.I.BakeTerrain();
+            if (FogOfWarRenderer.I != null) FogOfWarRenderer.I.Enabled = sc.fogOfWar && !DebugOverlay.ShowAll;
+
+            if (_shipRoot != null) Destroy(_shipRoot.gameObject);
+            var root = new GameObject("Ships");
+            root.transform.SetParent(transform.parent, false);
+            _shipRoot = root.transform;
+
+            ShipDatabase.ResetNames();
+            SpawnScenarioShips(sc);
+
+            if (_enemyCommander == null)
+                _enemyCommander = FleetCommander.Create(transform.parent, Team.Enemy, Mode);
+            _enemyCommander.mode = Mode;
+            _enemyCommander.difficulty = sc.aiDifficulty;
+            if (_playerAnalyst == null)
+                _playerAnalyst = FleetCommander.Create(transform.parent, Team.Player, Mode, false);
+            _playerAnalyst.mode = Mode;
+            _playerAnalyst.difficulty = AIDifficulty.Elite;
+
+            TimeLimit = sc.timeLimit;
+            ObjectiveText = "Scenario: " + sc.scenarioName + ". First to " + (int)sc.scoreToWin +
+                            " points, or sink the enemy fleet.";
+
+            var cam = RTSCamera.I;
+            if (cam != null) cam.FocusOn(WorldMap.I.PlayerDeployCenter, 420f);
+
+            GameEvents.RaiseMessage("Scenario: " + sc.scenarioName, Team.Neutral);
+            GameEvents.RaiseMessage(ObjectiveText, Team.Neutral);
+        }
+
+        /// <summary>Spawns exactly the hulls the scenario lists, where it lists them.</summary>
+        void SpawnScenarioShips(Scenario sc)
+        {
+            for (int g = 0; g < 3; g++) PlayerGroups[g].Clear();
+
+            int pi = 0;
+            for (int i = 0; i < sc.ships.Count; i++)
+            {
+                var e = sc.ships[i];
+                var stats = ShipDatabase.Get(e.cls);
+                Vector2 pos = new Vector2(e.x, e.y);
+                if (NavGrid.I != null) pos = NavGrid.I.NearestNavigable(pos, stats.draft);
+
+                var ship = Ship.Spawn(_shipRoot, e.team, e.cls, pos, e.heading);
+                if (e.cls == ShipClassType.Transport) _transports.Add(ship);
+                if (e.team == Team.Player)
+                {
+                    // deal the player's hulls round robin so the 1/2/3 control groups still work
+                    int g = pi % 3;
+                    PlayerGroups[g].Add(ship);
+                    ship.ControlGroup = g + 1;
+                    pi++;
+                }
+            }
+
+            PlayerStartCount = ShipRegistry.OfTeam(Team.Player).Count;
+            EnemyStartCount = ShipRegistry.OfTeam(Team.Enemy).Count;
+            RecomputePoints();
+
+            if (SelectionManager.I != null)
+                for (int g = 0; g < 3; g++)
+                    SelectionManager.I.AssignGroup(g + 1, PlayerGroups[g]);
+        }
+
         /// <summary>Builds the world, spawns both fleets and drops into the deployment phase.</summary>
         public void BeginMatch(GameMode mode, int seed, bool regenerateWorld = true)
         {
             Mode = mode;
             _seed = seed;
+            ActiveScenario = null;
+            if (WorldMap.I != null) WorldMap.I.ApplyScenario(null);
             Phase = GamePhase.Deployment;
             BattleTime = 0f;
             PlayerScore = EnemyScore = 0f;

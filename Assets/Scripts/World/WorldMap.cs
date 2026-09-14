@@ -57,6 +57,14 @@ namespace Naval
         /// <summary>The battlefield configuration this map was generated from.</summary>
         public MapConfig Config { get; private set; } = MapConfig.ForPreset(MapPreset.OceanArchipelago);
 
+        Scenario _scenario;
+
+        /// <summary>
+        /// Hands the map an authored scenario to build from. Call before <see cref="Generate"/>;
+        /// pass null to go back to fully procedural placement.
+        /// </summary>
+        public void ApplyScenario(Scenario s) { _scenario = s; }
+
         /// <summary>Nearest friendly squadron spawn to a point, used to clamp deployment dragging.</summary>
         public Vector2 NearestDeployCenter(Team team, Vector2 p)
         {
@@ -91,7 +99,24 @@ namespace Naval
             NavalMath.SetNoiseSeed(seed);
 
             Islands.Clear();
+            // BuildIslands also fixes the squadron deployment centres, so it runs either way; an
+            // authored scenario then swaps its own coastline in before the height field is built.
             BuildIslands(mode);
+            if (_scenario != null && _scenario.useCustomIslands)
+            {
+                Islands.Clear();
+                for (int i = 0; i < _scenario.islands.Count; i++)
+                {
+                    var si = _scenario.islands[i];
+                    Islands.Add(new IslandInfo
+                    {
+                        center = new Vector2(si.x, si.y),
+                        radius = si.radius,
+                        hazard = si.radius + (si.isRock ? 45f : 110f),
+                        isRock = si.isRock
+                    });
+                }
+            }
             BuildHeightField();
             BuildTexture();
             PlaceStrategicPoints(mode);
@@ -372,6 +397,21 @@ namespace Naval
             // ------------------------------------------------------------- capture zones
             var names = new[] { "A", "B", "C", "D", "E" };
             var spots = CapSpots(mode);
+
+            // an authored scenario owns its own objectives, exactly where they were placed
+            if (_scenario != null && _scenario.zones.Count > 0)
+            {
+                for (int i = 0; i < _scenario.zones.Count; i++)
+                {
+                    var sz = _scenario.zones[i];
+                    var z = CaptureZone.Create(transform, Clamp(new Vector2(sz.x, sz.y)),
+                        Mathf.Clamp(sz.radius, MapConfig.MinCaptureRadius, MapConfig.MaxCaptureRadius),
+                        string.IsNullOrEmpty(sz.name) ? names[i % names.Length] : sz.name);
+                    if (sz.owner != Team.Neutral) z.SetInitialOwner(sz.owner);
+                    Zones.Add(z);
+                }
+                return;
+            }
 
             float capRadius = Mathf.Clamp(Config.captureRadius, MapConfig.MinCaptureRadius, MapConfig.MaxCaptureRadius);
             for (int i = 0; i < spots.Length; i++)

@@ -20,7 +20,7 @@ namespace Naval
 
     public enum GameMode { Domination, Skirmish, FleetBattle, CaptureAndControl, Escort }
 
-    public enum GamePhase { Menu, Deployment, Battle, Victory, Defeat }
+    public enum GamePhase { Menu, Editor, Deployment, Battle, Victory, Defeat }
 
     public enum ContactState { Confirmed, Unknown, LastKnown }
 

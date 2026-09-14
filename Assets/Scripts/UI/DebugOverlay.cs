@@ -13,6 +13,9 @@ namespace Naval
         public static DebugOverlay I { get; private set; }
 
         public static bool Enabled { get; private set; }
+
+        /// <summary>Lets the dev view switch the AI and objective layer on alongside its own drawing.</summary>
+        public static void SetEnabled(bool on) => Enabled = on;
         public static bool ShowAll { get; private set; }
         public static bool ShowGrid { get; private set; }
 

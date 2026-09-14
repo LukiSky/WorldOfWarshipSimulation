@@ -39,6 +39,16 @@ namespace Naval
         readonly List<Ship> _stale = new List<Ship>();
         float _tickTimer;
 
+        /// <summary>
+        /// Hands the zone to a side before the battle opens, meter already full. Used by authored
+        /// scenarios that want to start from a position other than all-neutral.
+        /// </summary>
+        public void SetInitialOwner(Team t)
+        {
+            Owner = t;
+            Progress = t == Team.Player ? 1f : t == Team.Enemy ? -1f : 0f;
+        }
+
         public static CaptureZone Create(Transform parent, Vector2 pos, float radius, string name)
         {
             var go = new GameObject("Zone_" + name);

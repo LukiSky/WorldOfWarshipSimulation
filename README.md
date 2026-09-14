@@ -68,7 +68,12 @@ Clicking a ship in the task force roster selects it (or takes its helm if you ar
 `WASD`/edge scroll/middle-drag pan (fleet mode only — in direct control WASD is the helm), wheel
 zooms out far enough to see the whole map, `F` follows, `` ` `` frames the fleet. **`+` / `-` cycle time compression 1x → 2x → 4x → 8x**,
 `P` pauses, or use the buttons on the status bar. `F1` debug draw, `F2` reveal map, `F3` nav grid,
-`F4` command reference.
+`F4` command reference, **`F6` dev view**.
+
+**Dev view (`F6`)** enlarges hulls so they stay readable at strategic zoom, draws every turret's
+firing arc and blind sector, and rings the selected ship with its concealment, spotting, gun and
+torpedo ranges. Turrets that can bear on the current target are drawn in the team colour; those that
+cannot are red.
 
 ## Ship classes and consumables
 
@@ -77,10 +82,10 @@ see [SHIPS.md](SHIPS.md) for the full conversion.
 
 | Class | Ship | HP | Speed | Concealment | Gun range | Consumables |
 |---|---|---|---|---|---|---|
-| **DD** | Shimakaze | 17 900 | 39 kn | **5.6 km** | 11.4 km | HE `1`, torpedoes `2`, smoke `3`, engine boost `4`, damage control `5` |
+| **DD** | Shimakaze | 17 900 | 39 kn | **5.6 km** | 11.4 km | HE `1`, AP `2`, torpedoes `3`, smoke `4`, engine boost `5`, damage control `6` |
 | **CA** | Des Moines | 50 600 | 33 kn | 10.9 km | 15.8 km | HE `1`, AP `2`, radar `3`, hydro `4`, repair `5`, damage control `6` |
 | **BB** | Yamato | 97 200 | 27 kn | 14.1 km | **26.6 km** | HE `1`, AP `2`, damage control `3`, repair `4`, spotter plane `5` |
-| **SS** | Balao | 20 200 | 30 kn | 5.9 km surfaced, 2.3 km at periscope | — | Homing torps `1`, ping `2`, hydrophone `3`, surveillance `4`, damage control `5`, dive `X` |
+| **SS** | Balao | 20 200 | 30 kn | 5.9 km surfaced, 2.3 km at periscope | 4.0 km deck gun | HE `1`, homing torps `2`, ping `3`, hydrophone `4`, surveillance `5`, damage control `6`, dive `X` |
 
 Guns out-range eyes by a wide margin — a Yamato shoots 26.6 km but is only *seen* at 14.1 km — so
 **spotting decides the battle**. A destroyer that stays dark is what lets the battle line shoot at
@@ -113,6 +118,22 @@ Measured over 400 shells per case:
 | Des Moines AP into an angled Yamato bow | 100% ricochet |
 | Des Moines AP into a broadside Yamato | 100% penetration, **never a citadel** (450 mm cannot beat a 410 mm belt) |
 | Des Moines AP into a broadside Des Moines | 37% citadel |
+
+**Turret arcs.** Each mount sits at its own point along the hull and trains within its own arc, so
+firepower depends on heading. A Yamato bow-on to its target brings only its two forward turrets to
+bear — **6 of 9 barrels** — and gets all nine only once it opens to about 40°. Stern-on it has three.
+Turrets track to their arc limit and wait there rather than centring, so they are already pressed
+against the stop when the hull comes round.
+
+| Yamato heading relative to target | Barrels bearing |
+|---|---|
+| 0–30° (bow-on) | 6 of 9 |
+| 40–120° (broadside) | **9 of 9** |
+| 150° | 6 of 9 |
+| 180° (stern-on) | 3 of 9 |
+
+This is the cost side of angling: the heading that bounces shells is also the heading that silences a
+third of your guns.
 
 **Submarine ping → homing torpedoes:** a sonar ping marks a target for ~25 seconds. Torpedoes fired
 while the mark holds steer onto it; the marked ship also lights up on the plot until the lock decays.
@@ -152,6 +173,37 @@ a Yamato makes 27 knots, and the nearest cap is 7.5 km from the start line.
 
 The battlefield itself — terrain generation, draft and grounding, deployment geometry, weather, fog
 of war and the full objective ruleset — is documented in **[ENVIRONMENT.md](ENVIRONMENT.md)**.
+
+## Scenario editor
+
+**SCENARIO EDITOR** on the battle-setup screen opens a separate authoring screen. The procedural
+match is fine for play, but a reinforcement-learning agent needs the *same* situation over and over,
+and needs it back next week, so scenarios are hand-built and saved to disk.
+
+| Tool | What it does |
+|---|---|
+| **Select / Move** | Click to pick a ship, zone or island. Drag the middle to move it, drag the rim to resize. Right-drag turns a ship. `Delete` removes it. |
+| **Place ship** | Pick a class and side, then click to drop a hull. |
+| **Place zone** | Click to drop a capture circle and drag out its radius (500–2000 m). |
+| **Place island** | Click to drop an island and drag out its radius; the height field rebuilds when you play. |
+
+The right-hand panel sets weather, battlefield preset, enemy skill, time limit, map seed and fog of
+war. **SAVE** writes the scenario as JSON to `<persistentDataPath>/Scenarios/`, **LOAD** cycles
+through what is saved, and **PLAY SCENARIO** launches exactly what is on screen.
+
+A zone can be given a **starting owner**, so a scenario can open with a flag already held — useful
+for training a decap or a defence in isolation rather than always from a neutral board.
+
+```json
+{
+  "scenarioName": "RL Training Alpha",
+  "seed": 4242, "preset": 1, "weather": 1,
+  "timeLimit": 900.0, "aiDifficulty": 1, "fogOfWar": true,
+  "ships":  [ { "cls": 2, "team": 0, "x": -200.0, "y": -500.0, "heading": 15.0 } ],
+  "zones":  [ { "name": "A", "x": -400.0, "y": 120.0, "radius": 175.0, "owner": 1 } ],
+  "islands":[ { "x": 60.0, "y": 40.0, "radius": 145.0, "isRock": false } ]
+}
+```
 
 ## Architecture
 

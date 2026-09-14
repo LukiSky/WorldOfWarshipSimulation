@@ -101,17 +101,24 @@ namespace Naval
                 hullColor = new Color(0.33f, 0.38f, 0.44f), deckColor = new Color(0.23f, 0.27f, 0.32f),
                 fleetPointCost = 2,
 
-                // 127mm/50: only HE is carried, so the AP columns mirror it
+                // 127mm/50. AP is the light, fast-fusing kind: it will not trouble a belt, but it
+                // punishes another destroyer caught broadside.
                 mainBattery = new GunData
                 {
                     turrets = 3, barrelsPerTurret = 2,
-                    damage = 2150f, penetration = 21f,
+                    damage = 2300f, penetration = 40f,
                     reloadTime = 5.7f, range = Km(11.4f), shellSpeed = Mps(915f),
                     dispersion = Metres(104f), traverseSpeed = 7.9f,
                     fireChance = 0.09f, sigma = 2.0f,
                     overmatchThreshold = 127f / 14.3f,
                     heDamage = 2150f, hePenetration = 21f, heFireChance = 0.09f, heShellSpeed = Mps(915f),
-                    frontalArcBlock = 22f
+                    frontalArcBlock = 22f,
+                    mounts = new[]
+                    {
+                        new TurretMount { position =  0.30f, restHeading =   0f, arcHalfWidth = 150f },
+                        new TurretMount { position = -0.16f, restHeading = 180f, arcHalfWidth = 145f },
+                        new TurretMount { position = -0.34f, restHeading = 180f, arcHalfWidth = 152f }
+                    }
                 },
                 // Type 93 mod 3 "Long Lance"
                 torpedoes = new TorpedoData
@@ -170,7 +177,13 @@ namespace Naval
                     overmatchThreshold = 203f / 14.3f,
                     ricochetStart = 60f, ricochetAlways = 75f,
                     heDamage = 2800f, hePenetration = 34f, heFireChance = 0.14f, heShellSpeed = Mps(823f),
-                    frontalArcBlock = 26f
+                    frontalArcBlock = 26f,
+                    mounts = new[]
+                    {
+                        new TurretMount { position =  0.20f, restHeading =   0f, arcHalfWidth = 145f },
+                        new TurretMount { position =  0.34f, restHeading =   0f, arcHalfWidth = 152f, superfiring = true },
+                        new TurretMount { position = -0.30f, restHeading = 180f, arcHalfWidth = 150f }
+                    }
                 },
                 secondaryBattery = new GunData
                 {
@@ -227,7 +240,13 @@ namespace Naval
                     fireChance = 0.36f, sigma = 2.1f,
                     overmatchThreshold = 32f,   // the defining Yamato mechanic
                     heDamage = 7300f, hePenetration = 76f, heFireChance = 0.36f, heShellSpeed = Mps(780f),
-                    frontalArcBlock = 30f
+                    frontalArcBlock = 30f,
+                    mounts = new[]
+                    {
+                        new TurretMount { position =  0.20f, restHeading =   0f, arcHalfWidth = 143f },
+                        new TurretMount { position =  0.34f, restHeading =   0f, arcHalfWidth = 150f, superfiring = true },
+                        new TurretMount { position = -0.32f, restHeading = 180f, arcHalfWidth = 148f }
+                    }
                 },
                 // 155mm/60 wing mounts
                 secondaryBattery = new GunData
@@ -281,7 +300,11 @@ namespace Naval
                     reloadTime = 4.5f, range = Km(4.0f), shellSpeed = Mps(800f),
                     dispersion = Metres(90f), traverseSpeed = 30f,
                     fireChance = 0.05f, surfaceOnly = true, frontalArcBlock = 0f,
-                    heDamage = 1600f, hePenetration = 24f, heFireChance = 0.05f
+                    heDamage = 1600f, hePenetration = 24f, heFireChance = 0.05f,
+                    mounts = new[]
+                    {
+                        new TurretMount { position = 0.08f, restHeading = 0f, arcHalfWidth = 170f }
+                    }
                 },
                 // Bow six and stern four are modelled as two groups of five acoustic homing fish.
                 // The alternative heavy torpedo is not carried: one profile per boat.

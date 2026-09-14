@@ -69,6 +69,8 @@ namespace Naval
             // ---- presentation overlays ---------------------------------------
             WorldOverlay.Create(_root);
             DebugOverlay.Create(_root);
+            DevOverlay.Create(_root);
+            ScenarioEditor.Create(_root);
             UIManager.Create(_root);
 
             // ---- match --------------------------------------------------------

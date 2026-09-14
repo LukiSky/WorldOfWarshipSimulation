@@ -89,21 +89,13 @@ namespace Naval
             _turretPivots = new Transform[n];
             _turretY = new float[n];
             bool big = st.classType == ShipClassType.Battleship || st.classType == ShipClassType.Cruiser;
-            int fore = Mathf.CeilToInt(n / 2f);
 
             for (int i = 0; i < n; i++)
             {
                 var go = new GameObject("Turret" + i);
                 go.transform.SetParent(_root.transform, false);
-                float y;
-                if (i < fore)
-                    y = fore == 1 ? 0.24f : Mathf.Lerp(0.34f, 0.15f, i / Mathf.Max(1f, fore - 1f));
-                else
-                {
-                    int k = i - fore, aft = n - fore;
-                    y = aft == 1 ? -0.28f : Mathf.Lerp(-0.16f, -0.34f, k / Mathf.Max(1f, aft - 1f));
-                }
-                if (st.classType == ShipClassType.Submarine) y = 0.08f;
+                // the mount owns its position on the hull, so the sprite and the firing arc agree
+                float y = ShipWeapons.MountFor(mb, i, n).position;
                 _turretY[i] = y;
                 go.transform.localPosition = new Vector3(0f, y * st.length, 0f);
                 var sr = go.AddComponent<SpriteRenderer>();
@@ -141,7 +133,7 @@ namespace Naval
             float ps = RTSCamera.I.PixelScale;                 // world units per screen pixel
             float st = _s.Stats.length;
 
-            float hullScale = Mathf.Clamp(ps * 15f / Mathf.Max(1f, st), 1f, 3.2f);
+            float hullScale = Mathf.Clamp(ps * 15f / Mathf.Max(1f, st), 1f, DevOverlay.HullScaleCap);
             if (_hullT != null && !_s.Damage.IsSinking)
                 _hullT.localScale = new Vector3(hullScale, hullScale, 1f);
 
@@ -160,7 +152,7 @@ namespace Naval
                 // rotates with the ship - a symbol you have to read upside down is no good.
                 // ~34 screen pixels: large enough that the class symbol is actually legible,
                 // small enough that a packed formation does not turn into a wall of icons
-                float size = Mathf.Clamp(ps * 34f, 3f, 120f);
+                float size = Mathf.Clamp(ps * (DevOverlay.Enabled ? 52f : 34f), 3f, 200f);
                 _markerT.localScale = new Vector3(size, size, 1f);
                 float lift = st * 0.55f * hullScale + size * 0.85f;
 

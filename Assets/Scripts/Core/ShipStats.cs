@@ -2,6 +2,26 @@ using UnityEngine;
 
 namespace Naval
 {
+    /// <summary>
+    /// One gun mount. Real warships do not have a single shared blind sector: each turret sits at a
+    /// point along the hull and can train only so far before the superstructure is in the way, which
+    /// is why turning to angle your armour costs you the guns that can no longer bear.
+    /// </summary>
+    [System.Serializable]
+    public class TurretMount
+    {
+        /// <summary>Signed fraction of hull length: +0.34 is near the bow, -0.34 near the stern.</summary>
+        public float position = 0.3f;
+        /// <summary>Where the mount points when idle. 0 trains forward, 180 trains aft.</summary>
+        public float restHeading = 0f;
+        /// <summary>How far either side of rest it can train, in degrees.</summary>
+        public float arcHalfWidth = 150f;
+        /// <summary>A raised mount firing over the one in front of it, so it sees slightly further round.</summary>
+        public bool superfiring = false;
+
+        public TurretMount Clone() => (TurretMount)MemberwiseClone();
+    }
+
     /// <summary>Data driven gun battery description.</summary>
     [System.Serializable]
     public class GunData
@@ -38,6 +58,12 @@ namespace Naval
         /// <summary>Impact angle from the plate normal (degrees) beyond which the shell always bounces.</summary>
         public float ricochetAlways = 60f;
 
+        /// <summary>
+        /// Per-mount geometry and firing arcs. Left null, arcs fall back to a simple fore/aft split
+        /// derived from <see cref="turrets"/>, which keeps older data working.
+        /// </summary>
+        public TurretMount[] mounts;
+
         // Explicit high-explosive ballistics. Where these are left at 0 the HE round is derived
         // from the AP one, which is what the secondary batteries rely on.
         public float heDamage = 0f;
@@ -45,7 +71,17 @@ namespace Naval
         public float heFireChance = 0f;
         public float heShellSpeed = 0f;
 
-        public GunData Clone() => (GunData)MemberwiseClone();
+        public GunData Clone()
+        {
+            var g = (GunData)MemberwiseClone();
+            if (mounts != null)
+            {
+                g.mounts = new TurretMount[mounts.Length];
+                for (int i = 0; i < mounts.Length; i++)
+                    g.mounts[i] = mounts[i] != null ? mounts[i].Clone() : null;
+            }
+            return g;
+        }
     }
 
     [System.Serializable]

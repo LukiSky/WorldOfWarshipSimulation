@@ -97,10 +97,11 @@ namespace Naval
             {
                 case ShipClassType.Destroyer:
                     Add(AbilityId.ShellHE, "HE Shells", "1", 0f, 0f, 0);
-                    Add(AbilityId.Torpedoes, "Torpedoes", "2", 0f, 0f, 0);
-                    Add(AbilityId.SmokeScreen, "Smoke Screen", "3", 160f, 97f, 3);
-                    Add(AbilityId.EngineBoost, "Engine Boost", "4", 120f, 120f, 3);
-                    Add(AbilityId.DamageControl, "Damage Control", "5", 40f, 0f, 0);
+                    Add(AbilityId.ShellAP, "AP Shells", "2", 0f, 0f, 0);
+                    Add(AbilityId.Torpedoes, "Torpedoes", "3", 0f, 0f, 0);
+                    Add(AbilityId.SmokeScreen, "Smoke Screen", "4", 160f, 97f, 3);
+                    Add(AbilityId.EngineBoost, "Engine Boost", "5", 120f, 120f, 3);
+                    Add(AbilityId.DamageControl, "Damage Control", "6", 40f, 0f, 0);
                     break;
 
                 case ShipClassType.Cruiser:
@@ -122,11 +123,13 @@ namespace Naval
                     break;
 
                 case ShipClassType.Submarine:
-                    Add(AbilityId.HomingTorpedoes, "Homing Torps", "1", 0f, 0f, 0);
-                    Add(AbilityId.SonarPing, "Sonar Ping", "2", 6.5f, 25f, 0);
-                    Add(AbilityId.Hydrophone, "Hydrophone", "3", 60f, 30f, 4);
-                    Add(AbilityId.SubmarineSurveillance, "Sub Surveillance", "4", 120f, 60f, 3);
-                    Add(AbilityId.DamageControl, "Damage Control", "5", 40f, 15f, 3);
+                    // the deck gun is surface-only, but it still needs an ammunition selection
+                    Add(AbilityId.ShellHE, "HE Shells", "1", 0f, 0f, 0);
+                    Add(AbilityId.HomingTorpedoes, "Homing Torps", "2", 0f, 0f, 0);
+                    Add(AbilityId.SonarPing, "Sonar Ping", "3", 6.5f, 25f, 0);
+                    Add(AbilityId.Hydrophone, "Hydrophone", "4", 60f, 30f, 4);
+                    Add(AbilityId.SubmarineSurveillance, "Sub Surveillance", "5", 120f, 60f, 3);
+                    Add(AbilityId.DamageControl, "Damage Control", "6", 40f, 15f, 3);
                     Add(AbilityId.Dive, "Dive / Surface", "X", 0f, 0f, 0);
                     break;
 

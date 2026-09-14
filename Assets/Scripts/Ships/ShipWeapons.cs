@@ -181,15 +181,57 @@ namespace Naval
                 TurretAngles[i] = Mathf.MoveTowardsAngle(TurretAngles[i], TurretTargetAngles[i], speed * dt);
         }
 
-        /// <summary>Can turret i bear on this heading? Fore turrets cannot shoot astern and vice versa.</summary>
+        /// <summary>
+        /// The mount description for turret i, falling back to a fore/aft split when the gun has no
+        /// explicit mount data.
+        /// </summary>
+        public static TurretMount MountFor(GunData gun, int index, int turretCount)
+        {
+            if (gun != null && gun.mounts != null && index < gun.mounts.Length && gun.mounts[index] != null)
+                return gun.mounts[index];
+
+            // legacy fallback: first half forward, remainder aft, sharing one blind sector
+            int fore = Mathf.CeilToInt(turretCount / 2f);
+            bool forward = index < fore;
+            float block = gun != null ? gun.frontalArcBlock : 20f;
+            return new TurretMount
+            {
+                position = forward ? 0.30f : -0.30f,
+                restHeading = forward ? 0f : 180f,
+                arcHalfWidth = Mathf.Clamp(180f - block, 30f, 179f)
+            };
+        }
+
+        public TurretMount Mount(int index) =>
+            MountFor(_s.Stats.mainBattery, index, TurretAngles != null ? TurretAngles.Length : 0);
+
+        /// <summary>
+        /// Can turret i bear on this heading? Each mount trains within its own arc either side of
+        /// where it rests, so a bow-on ship loses its after turrets and a stern chase loses its
+        /// forward ones. This is the cost side of angling the armour.
+        /// </summary>
         public bool TurretCanBear(int index, float worldHeading)
         {
             var mb = _s.Stats.mainBattery;
             if (mb == null) return false;
-            float rel = Mathf.Abs(Mathf.DeltaAngle(_s.Heading, worldHeading));
-            bool forward = index < Mathf.CeilToInt(TurretAngles.Length / 2f);
-            if (_s.Stats.classType == ShipClassType.Submarine) return true;
-            return forward ? rel < 180f - mb.frontalArcBlock : rel > mb.frontalArcBlock;
+            var m = Mount(index);
+            float relative = Mathf.DeltaAngle(_s.Heading, worldHeading);      // 0 = dead ahead
+            return Mathf.Abs(Mathf.DeltaAngle(relative, m.restHeading)) <= m.arcHalfWidth;
+        }
+
+        /// <summary>
+        /// The world heading turret i will actually train to. Inside its arc that is the bearing
+        /// itself; outside it, the nearest arc limit, so the mount sits pressed against the stop
+        /// and is already there the moment the hull turns far enough.
+        /// </summary>
+        public float TurretTrainTarget(int index, float worldHeading)
+        {
+            var m = Mount(index);
+            float relative = Mathf.DeltaAngle(_s.Heading, worldHeading);
+            float off = Mathf.DeltaAngle(relative, m.restHeading);
+            if (Mathf.Abs(off) <= m.arcHalfWidth) return worldHeading;
+            float limit = m.restHeading + Mathf.Sign(off) * m.arcHalfWidth;
+            return NavalMath.Wrap360(_s.Heading + limit);
         }
 
         // ------------------------------------------------------------------ main battery
@@ -255,7 +297,7 @@ namespace Naval
             for (int i = 0; i < TurretTargetAngles.Length; i++)
             {
                 bool canBear = TurretCanBear(i, bearing);
-                TurretTargetAngles[i] = canBear ? bearing : _s.Heading + (i < TurretAngles.Length / 2 ? 0f : 180f);
+                TurretTargetAngles[i] = TurretTrainTarget(i, bearing);
                 if (!canBear) continue;
                 if (Mathf.Abs(Mathf.DeltaAngle(TurretAngles[i], bearing)) > 6f) continue;
                 barrels += mb.barrelsPerTurret;
